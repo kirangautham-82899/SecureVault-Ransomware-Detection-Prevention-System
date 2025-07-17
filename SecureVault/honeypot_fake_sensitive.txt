@@ -1,0 +1,2 @@
+DO NOT OPEN - HONEYPOT FILE
+This file is monitored for suspicious access.
