@@ -1,6 +1,4 @@
-Here's a strong README file for SecureVault, without emojis:
 
------
 
 # SecureVault – Real-Time Ransomware Detection System
 
