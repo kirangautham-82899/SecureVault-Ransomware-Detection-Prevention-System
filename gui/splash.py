@@ -31,11 +31,7 @@ class CustomSplashScreen(QSplashScreen):
 def show_splash_then_launch():
     app = QApplication(sys.argv)
 
-    # Dynamic path handling
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    assets_path = os.path.join(base_dir, "assets", "splash.jpg")
-
-    splash_pix = QPixmap(assets_path).scaled(
+    splash_pix = QPixmap("C:/Users/kiran/SecureVault/gui/assets/splash.jpg").scaled(
         812, 596,
         Qt.AspectRatioMode.KeepAspectRatio,
         Qt.TransformationMode.SmoothTransformation

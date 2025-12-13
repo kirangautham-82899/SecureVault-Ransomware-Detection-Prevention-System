@@ -1,15 +1,6 @@
-# Logs and Reports
+__pycache__/
 *.log
-*.html
-suspicious_activity.log
 Evidence_Report_*.html
 hash_db.json
 honeypot_fake_sensitive.txt
-
-# System
-__pycache__/
-*.pyc
-
-# IDEs
 .vscode/
-.idea/
