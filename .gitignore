@@ -1,18 +1,15 @@
-# Logs
+# Logs and Reports
 *.log
+*.html
 suspicious_activity.log
-
-# Reports
 Evidence_Report_*.html
-
-# Data
 hash_db.json
 honeypot_fake_sensitive.txt
 
-# Python
+# System
 __pycache__/
 *.pyc
 
-# System
-thumbs.db
-desktop.ini
+# IDEs
+.vscode/
+.idea/
