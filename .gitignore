@@ -1,0 +1,18 @@
+# Logs
+*.log
+suspicious_activity.log
+
+# Reports
+Evidence_Report_*.html
+
+# Data
+hash_db.json
+honeypot_fake_sensitive.txt
+
+# Python
+__pycache__/
+*.pyc
+
+# System
+thumbs.db
+desktop.ini
