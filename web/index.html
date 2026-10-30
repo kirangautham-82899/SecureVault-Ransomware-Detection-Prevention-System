@@ -288,7 +288,10 @@ function matches(level) {
 }
 
 function addEvent(ev, live) {
-  if (ev.id) lastId = Math.max(lastId, ev.id);
+  if (ev.id) {
+    if (live && ev.id <= lastId) return;  // already shown via the snapshot
+    lastId = Math.max(lastId, ev.id);
+  }
   const li = document.createElement("li");
   li.className = ev.level + (live ? " new" : "");
   li.dataset.level = ev.level;

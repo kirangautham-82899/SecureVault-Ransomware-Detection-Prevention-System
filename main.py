@@ -22,7 +22,7 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 APP_NAME = "SecureVault"
-APP_VERSION = "2.1.1"
+APP_VERSION = "2.1.2"
 
 # Bundled, read-only resources (web viewer, built-in signatures). In the packaged
 # Windows app PyInstaller unpacks these into sys._MEIPASS.

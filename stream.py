@@ -511,11 +511,13 @@ def _make_handler(live):
             q = queue.Queue(maxsize=500)
             registered = False
             try:
+                # Register before taking the snapshot so no event can slip through the gap;
+                # the viewer skips the rare event that ends up in both.
+                live._register(q, self._origin())
+                registered = True
                 snapshot = json.dumps(live.snapshot())
                 self.wfile.write(f"retry: 3000\nevent: snapshot\ndata: {snapshot}\n\n".encode("utf-8"))
                 self.wfile.flush()
-                live._register(q, self._origin())
-                registered = True
                 while True:
                     try:
                         message = q.get(timeout=15)
