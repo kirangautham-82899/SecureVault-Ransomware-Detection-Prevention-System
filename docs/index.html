@@ -8,324 +8,249 @@
 <meta property="og:title" content="SecureVault · Free ransomware protection for Windows">
 <meta property="og:description" content="Real-time ransomware detection, honeypots, a built-in antivirus scanner and live streaming. Free, with the source on GitHub.">
 <meta property="og:image" content="https://kirangautham-82899.github.io/SecureVault-Ransomware-Detection-Prevention-System/dashboard.png">
-<meta name="theme-color" content="#4c8df6">
+<meta name="theme-color" content="#ffffff">
 <link rel="icon" href="logo.svg" type="image/svg+xml">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://api.github.com; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <style>
 :root {
-  --bg: #eef3fb; --bg-2: #e4ecf9; --tint: #f5f8fe; --tint-2: #eaf1fc;
-  --line: rgba(29, 43, 79, .10); --text: #1d2b4f; --muted: #6b7a9c; --subtle: #a6b3cf;
-  --accent: #4c8df6; --accent-2: #7aa9ff; --accent-deep: #3a78e6; --accent-soft: #e6f0ff; --violet: #8b7bff;
-  --success: #2fbf8f; --warning: #f2a33a; --critical: #ef5b6e;
-  --navy: #0f1a36; --navy-2: #182a57;
+  --bg: #ffffff; --bg-soft: #f7f9fd; --bg-tint: #eef3fb;
+  --line: #e8ecf3; --line-strong: #d9e0ec;
+  --text: #0f1729; --muted: #5b6782; --subtle: #8d98b0;
+  --accent: #4c8df6; --accent-2: #7aa9ff; --accent-deep: #2f6fe0; --accent-soft: #eaf2ff; --violet: #8b7bff;
+  --success: #22a77a; --warning: #e0952b; --critical: #e5485d;
+  --radius: 12px;
   --ease: cubic-bezier(.2, .8, .2, 1);
-  --pad: clamp(20px, 5vw, 88px);
+  --mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
 }
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; scroll-padding-top: 84px; }
+html { scroll-behavior: smooth; scroll-padding-top: 72px; }
 body {
-  margin: 0; color: var(--text); background: var(--bg);
-  font-family: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
-  -webkit-font-smoothing: antialiased; line-height: 1.6; overflow-x: hidden;
+  margin: 0; background: var(--bg); color: var(--text); font-size: 16px; line-height: 1.6;
+  font-family: "Geist", "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased; overflow-x: hidden;
 }
 a { color: inherit; text-decoration: none; }
-img { max-width: 100%; display: block; }
-code { background: var(--tint-2); padding: 2px 7px; border-radius: 7px; font-size: .9em; }
-.wrap { width: 100%; max-width: 1480px; margin: 0 auto; padding-inline: var(--pad); }
-.eyebrow { display: inline-flex; align-items: center; gap: 10px; color: var(--accent-deep); font-weight: 750; font-size: 12.5px;
-  letter-spacing: 2px; text-transform: uppercase; }
-.eyebrow::before { content: ""; width: 26px; height: 2px; border-radius: 2px; background: currentColor; }
-h1, h2, h3 { letter-spacing: -.02em; }
-h2 { font-size: clamp(32px, 4.6vw, 60px); line-height: 1.05; margin: 18px 0; font-weight: 800; letter-spacing: -.035em; }
-.lede { color: var(--muted); font-size: clamp(16px, 1.5vw, 19px); max-width: 640px; margin: 0; }
+img { max-width: 100%; height: auto; display: block; }
+code { font-family: var(--mono); font-size: .88em; background: var(--bg-tint); padding: 2px 6px; border-radius: 6px; }
+.container { width: 100%; max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+.muted { color: var(--muted); }
 
-/* ---------- Buttons ---------- */
-.btn { display: inline-flex; align-items: center; gap: 10px; padding: 15px 26px; border-radius: 999px; font-weight: 650;
-  font-size: 15.5px; border: 1px solid var(--line); background: rgba(255, 255, 255, .7); cursor: pointer; font-family: inherit;
-  color: var(--text); transition: transform .3s var(--ease), box-shadow .3s, background .3s; }
-.btn:hover { transform: translateY(-2px); background: #fff; box-shadow: 0 12px 30px rgba(76, 141, 246, .18); }
-.btn.primary { color: #fff; border: none; position: relative; overflow: hidden;
-  background: linear-gradient(135deg, var(--accent-2), var(--accent) 55%, var(--accent-deep)); box-shadow: 0 14px 34px rgba(76, 141, 246, .4); }
-.btn.primary::after { content: ""; position: absolute; inset: 0; transform: translateX(-120%);
-  background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, .45), transparent 70%); animation: shine 4.5s ease-in-out infinite; }
-.btn.small { padding: 10px 18px; font-size: 14px; }
-.btn svg { width: 18px; height: 18px; flex: none; }
-@keyframes shine { 0%, 60% { transform: translateX(-120%); } 100% { transform: translateX(120%); } }
+/* Buttons */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 44px; padding: 0 20px; border-radius: 10px;
+  font-weight: 600; font-size: 14.5px; line-height: 1; font-family: inherit; border: 1px solid var(--line-strong); background: #fff; color: var(--text); cursor: pointer;
+  transition: background .2s, border-color .2s, transform .2s var(--ease), box-shadow .2s; white-space: nowrap; }
+.btn:hover { background: var(--bg-soft); border-color: #c9d2e3; }
+.btn.primary { background: var(--text); border-color: var(--text); color: #fff; }
+.btn.primary:hover { background: #24304a; transform: translateY(-1px); box-shadow: 0 8px 20px rgba(15, 23, 41, .18); }
+.btn.sm { height: 34px; padding: 0 14px; font-size: 13.5px; border-radius: 8px; }
+.btn svg { width: 16px; height: 16px; flex: none; }
 
-/* ---------- Nav: hides while scrolling down, returns on scroll up ---------- */
-nav { position: fixed; inset: 0 0 auto 0; z-index: 50; transition: transform .45s var(--ease), background .3s, box-shadow .3s; }
-nav.scrolled { background: rgba(238, 243, 251, .85); backdrop-filter: saturate(1.6) blur(18px); -webkit-backdrop-filter: saturate(1.6) blur(18px);
-  box-shadow: 0 1px 0 var(--line); }
-nav.hidden { transform: translateY(-100%); }
-nav .wrap { display: flex; align-items: center; gap: 30px; height: 72px; }
-.brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 18px; margin-right: auto; letter-spacing: -.3px; }
-.brand img { width: 32px; height: 32px; filter: drop-shadow(0 6px 10px rgba(76, 141, 246, .35)); }
-.links { display: flex; gap: 30px; font-size: 14.5px; font-weight: 600; color: var(--muted); }
-.links a { position: relative; transition: color .2s; }
-.links a::after { content: ""; position: absolute; left: 0; right: 0; bottom: -6px; height: 2px; border-radius: 2px;
-  background: var(--accent); transform: scaleX(0); transition: transform .3s var(--ease); }
-.links a:hover, .links a.active { color: var(--accent-deep); }
-.links a:hover::after, .links a.active::after { transform: scaleX(1); }
-.progress { position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; transform-origin: left; transform: scaleX(0);
-  background: linear-gradient(90deg, var(--accent-2), var(--violet)); }
+/* Nav */
+header.nav { position: sticky; top: 0; z-index: 40; background: rgba(255, 255, 255, .8); backdrop-filter: saturate(1.8) blur(12px);
+  -webkit-backdrop-filter: saturate(1.8) blur(12px); border-bottom: 1px solid transparent; transition: border-color .2s; }
+header.nav.scrolled { border-bottom-color: var(--line); }
+.nav .container { display: flex; align-items: center; gap: 28px; height: 64px; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 16px; letter-spacing: -.01em; margin-right: auto; }
+.brand img { width: 26px; height: 26px; }
+.nav-links { display: flex; gap: 24px; font-size: 14px; color: var(--muted); }
+.nav-links a:hover, .nav-links a.active { color: var(--text); }
+.nav-actions { display: flex; gap: 8px; }
 
-/* ---------- Hero ---------- */
-.hero { position: relative; min-height: min(100vh, 980px); display: flex; align-items: center; padding: 110px 0 80px; overflow: hidden; isolation: isolate; }
-.hero::before { content: ""; position: absolute; inset: 0; z-index: -2;
-  background:
-    radial-gradient(900px 700px at 85% 10%, rgba(122, 169, 255, .45), transparent 60%),
-    radial-gradient(700px 600px at 0% 90%, rgba(47, 191, 143, .16), transparent 60%),
-    radial-gradient(600px 500px at 55% 100%, rgba(139, 123, 255, .18), transparent 60%),
-    linear-gradient(180deg, var(--bg), var(--bg-2)); }
-.hero::after { content: ""; position: absolute; inset: 0; z-index: -1; opacity: .5;
-  background-image: linear-gradient(rgba(76, 141, 246, .08) 1px, transparent 1px), linear-gradient(90deg, rgba(76, 141, 246, .08) 1px, transparent 1px);
-  background-size: 64px 64px; mask-image: radial-gradient(ellipse at 30% 40%, #000 15%, transparent 65%);
-  -webkit-mask-image: radial-gradient(ellipse at 30% 40%, #000 15%, transparent 65%); }
-.hero .wrap { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.15fr); gap: clamp(30px, 4vw, 70px); align-items: center; }
-.hero-copy { position: relative; z-index: 2; }
-.pill { display: inline-flex; align-items: center; gap: 8px; padding: 5px 14px 5px 5px; border-radius: 999px; font-size: 13px; font-weight: 600;
-  color: var(--muted); background: rgba(255, 255, 255, .75); border: 1px solid var(--line); }
-.pill b { background: linear-gradient(135deg, var(--accent-2), var(--accent)); color: #fff; padding: 3px 10px; border-radius: 999px; font-size: 12px; }
-h1 { font-size: clamp(42px, 4.7vw, 84px); line-height: 1.02; letter-spacing: -.045em; margin: 26px 0 24px; font-weight: 800; }
-.grad { background: linear-gradient(110deg, var(--accent-deep), var(--violet) 45%, var(--accent-2) 70%, var(--accent-deep));
-  background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: flow 8s linear infinite; }
-@keyframes flow { to { background-position: 250% 0; } }
-.rotator { display: inline-grid; justify-items: start; vertical-align: bottom; overflow: hidden; height: 1.08em; transition: width .7s var(--ease); }
-.rotator span { grid-area: 1 / 1; white-space: nowrap; padding-bottom: .08em; transition: transform .7s var(--ease), opacity .7s; }
-.rotator span.out { transform: translateY(-105%); opacity: 0; }
-.rotator span.next { transform: translateY(105%); opacity: 0; }
-.hero .lede { margin-bottom: 36px; font-size: clamp(17px, 1.45vw, 20px); }
-.cta { display: flex; gap: 14px; flex-wrap: wrap; }
-.meta { margin-top: 22px; font-size: 13.5px; color: var(--muted); font-weight: 500; display: flex; gap: 18px; flex-wrap: wrap; }
-.meta span { display: inline-flex; align-items: center; gap: 7px; }
-.meta i { width: 7px; height: 7px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 0 rgba(47, 191, 143, .6); animation: ping 2s infinite; }
-@keyframes ping { 70% { box-shadow: 0 0 0 8px rgba(47, 191, 143, 0); } 100% { box-shadow: 0 0 0 0 rgba(47, 191, 143, 0); } }
+/* Hero */
+.hero { position: relative; padding: 88px 0 56px; text-align: center; overflow: hidden; }
+.hero::before { content: ""; position: absolute; inset: -40% -10% auto; height: 900px; z-index: -1; pointer-events: none;
+  background: radial-gradient(closest-side, rgba(122, 169, 255, .28), transparent), radial-gradient(40% 50% at 70% 40%, rgba(139, 123, 255, .14), transparent); }
+.hero::after { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; opacity: .6;
+  background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px);
+  background-size: 48px 48px; mask-image: radial-gradient(ellipse 60% 50% at 50% 0%, #000, transparent);
+  -webkit-mask-image: radial-gradient(ellipse 60% 50% at 50% 0%, #000, transparent); }
+.announce { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px 0 4px; border-radius: 999px; font-size: 13px;
+  color: var(--muted); border: 1px solid var(--line); background: rgba(255, 255, 255, .8); transition: border-color .2s; }
+.announce:hover { border-color: var(--line-strong); color: var(--text); }
+.announce b { height: 22px; display: inline-flex; align-items: center; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  color: var(--accent-deep); background: var(--accent-soft); }
+h1 { font-size: clamp(36px, 5.2vw, 60px); line-height: 1.18; letter-spacing: -.04em; font-weight: 800; margin: 22px auto 16px; max-width: 820px; }
+.grad { background: linear-gradient(100deg, var(--accent-deep), var(--violet) 55%, var(--accent)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.rotator { display: inline-grid; justify-items: start; vertical-align: top; overflow: hidden; height: 1.18em; transition: width .6s var(--ease); text-align: left; }
+.rotator span { grid-area: 1 / 1; white-space: nowrap; line-height: 1.18; transition: transform .6s var(--ease), opacity .6s; }
+.rotator span.out { transform: translateY(-100%); opacity: 0; }
+.rotator span.next { transform: translateY(100%); opacity: 0; }
+.hero p.lead { font-size: 18px; color: var(--muted); max-width: 600px; margin: 0 auto 30px; }
+.hero .actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.cmd { display: inline-flex; align-items: center; gap: 12px; height: 44px; padding: 0 8px 0 16px; border-radius: 10px; border: 1px solid var(--line-strong);
+  background: var(--bg-soft); font-family: var(--mono); font-size: 13.5px; color: var(--muted); }
+.cmd span::before { content: "$ "; color: var(--subtle); }
+.cmd button { height: 30px; width: 30px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); cursor: pointer; display: grid; place-items: center; }
+.cmd button:hover { background: #fff; color: var(--text); }
+.hero .note { margin-top: 18px; font-size: 13px; color: var(--subtle); }
 
-/* The product shot bleeds off the right edge and straightens as you scroll */
-.hero-visual { position: relative; margin-right: calc(-1 * var(--pad) - 40px); }
-.hero-visual .screen { border-radius: 22px 0 0 22px; overflow: hidden;
-  box-shadow: 0 50px 120px rgba(58, 120, 230, .32), 0 0 0 1px rgba(255, 255, 255, .9);
-  transform: perspective(1800px) rotateY(calc(-9deg * var(--tilt, 1))) rotateX(calc(3deg * var(--tilt, 1)));
-  transform-origin: left center; }
-.chip { position: absolute; display: flex; align-items: center; gap: 10px; padding: 11px 16px; border-radius: 16px; z-index: 2;
-  background: rgba(255, 255, 255, .92); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-  box-shadow: 0 20px 44px rgba(29, 43, 79, .16); font-size: 13px; font-weight: 650; white-space: nowrap; animation: float 6s ease-in-out infinite; }
-.chip small { display: block; font-weight: 500; color: var(--muted); font-size: 11.5px; }
-.chip .dot { width: 32px; height: 32px; border-radius: 11px; display: grid; place-items: center; font-size: 15px; flex: none; }
-.chip.c1 { left: -40px; top: 12%; } .chip.c1 .dot { background: rgba(239, 91, 110, .14); }
-.chip.c2 { left: 34%; bottom: -26px; animation-delay: -2s; } .chip.c2 .dot { background: var(--accent-soft); }
-.chip.c3 { left: -24px; bottom: 24%; animation-delay: -4s; } .chip.c3 .dot { background: rgba(242, 163, 58, .16); }
-@keyframes float { 50% { transform: translateY(-12px); } }
-.scroll-cue { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); width: 26px; height: 42px; border-radius: 14px;
-  border: 2px solid rgba(29, 43, 79, .2); }
-.scroll-cue::after { content: ""; position: absolute; left: 50%; top: 8px; width: 4px; height: 8px; border-radius: 2px; margin-left: -2px;
-  background: var(--accent); animation: cue 1.8s ease-in-out infinite; }
-@keyframes cue { 60% { transform: translateY(12px); opacity: 0; } 100% { opacity: 0; } }
+.window { position: relative; max-width: 1000px; margin: 56px auto 0; border-radius: 14px; border: 1px solid var(--line-strong); background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 41, .04), 0 30px 60px -20px rgba(47, 111, 224, .28); overflow: hidden; }
+.window .bar { display: flex; align-items: center; gap: 7px; height: 36px; padding: 0 14px; border-bottom: 1px solid var(--line); background: var(--bg-soft); }
+.window .bar i { width: 10px; height: 10px; border-radius: 50%; background: #dde3ee; }
+.window .bar span { margin-left: 10px; font-size: 12px; color: var(--subtle); }
+.window img { width: 100%; }
+.glow { position: absolute; left: 50%; top: 40%; width: 70%; height: 60%; transform: translate(-50%, -50%); z-index: -1;
+  background: radial-gradient(closest-side, rgba(76, 141, 246, .35), transparent); filter: blur(30px); }
 
-/* ---------- Ticker ---------- */
-.ticker { border-block: 1px solid var(--line); background: rgba(255, 255, 255, .6); overflow: hidden; padding: 18px 0;
-  mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent); -webkit-mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent); }
-.ticker .track { display: flex; width: max-content; animation: marquee 42s linear infinite; }
-.ticker:hover .track { animation-play-state: paused; }
-.ticker span { display: inline-flex; align-items: center; padding: 0 30px; font-weight: 650; color: var(--muted); font-size: 15px; white-space: nowrap; }
-.ticker span::after { content: "✦"; color: var(--accent-2); margin-left: 60px; font-size: 12px; }
-@keyframes marquee { to { transform: translateX(-50%); } }
+/* Logos / trust row */
+.trust { padding: 28px 0 8px; text-align: center; }
+.trust p { font-size: 13px; color: var(--subtle); margin: 0 0 14px; }
+.trust ul { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 28px;
+  font-size: 14px; font-weight: 600; color: var(--muted); }
+.trust li { display: inline-flex; align-items: center; gap: 7px; }
+.trust li::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
 
-/* ---------- Sections ---------- */
-section { padding: clamp(80px, 11vw, 150px) 0; position: relative; }
-.head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 40px; align-items: end; margin-bottom: clamp(48px, 6vw, 80px); }
-.head .lede { justify-self: end; }
+/* Sections */
+section { padding: 96px 0; }
+section.soft { background: var(--bg-soft); border-block: 1px solid var(--line); }
+.kicker { font-size: 13px; font-weight: 600; color: var(--accent-deep); margin: 0 0 10px; }
+h2 { font-size: clamp(28px, 3.4vw, 40px); line-height: 1.15; letter-spacing: -.035em; font-weight: 800; margin: 0 0 12px; }
+.section-head { max-width: 640px; margin: 0 0 44px; }
+.section-head.center { margin-inline: auto; text-align: center; }
+.section-head p { color: var(--muted); font-size: 17px; margin: 0; }
 
 /* Stats */
-.stats { display: grid; grid-template-columns: repeat(4, 1fr); }
-.stat { padding: 10px clamp(16px, 2.5vw, 40px); border-left: 1px solid var(--line); }
-.stat:first-child { border-left: 0; padding-left: 0; }
-.stat b { display: block; font-size: clamp(42px, 5vw, 72px); line-height: 1.05; letter-spacing: -.04em; font-weight: 800;
-  background: linear-gradient(135deg, var(--text), var(--accent-deep)); -webkit-background-clip: text; background-clip: text; color: transparent; }
-.stat span { display: block; color: var(--muted); font-size: 15px; margin-top: 10px; max-width: 240px; }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: #fff; }
+.stat { padding: 24px; border-left: 1px solid var(--line); }
+.stat:first-child { border-left: 0; }
+.stat b { display: block; font-size: 30px; letter-spacing: -.03em; line-height: 1.2; }
+.stat span { font-size: 13.5px; color: var(--muted); }
 
-/* Features: open grid separated by hairlines */
-.features { display: grid; grid-template-columns: repeat(4, 1fr); column-gap: clamp(24px, 3vw, 56px); row-gap: 56px; }
-.feature { padding-top: 26px; border-top: 1px solid var(--line); position: relative; }
-.feature::before { content: ""; position: absolute; top: -1px; left: 0; height: 2px; width: 0; background: linear-gradient(90deg, var(--accent), var(--violet));
-  transition: width .6s var(--ease); }
-.feature:hover::before { width: 100%; }
-.feature .ic { font-size: 28px; display: inline-block; transition: transform .45s var(--ease); }
-.feature:hover .ic { transform: translateY(-4px) rotate(-8deg) scale(1.1); }
-.feature h3 { font-size: 19px; margin: 14px 0 8px; }
-.feature p { margin: 0; color: var(--muted); font-size: 15px; }
+/* Feature grid (hairline cells, Vercel-style) */
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--line); border-left: 1px solid var(--line); }
+.cell { padding: 28px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); position: relative; transition: background .25s; }
+.cell:hover { background: var(--bg-soft); }
+.cell .ic { width: 36px; height: 36px; border-radius: 9px; display: grid; place-items: center; font-size: 17px; background: var(--accent-soft); margin-bottom: 16px; }
+.cell h3 { font-size: 16px; margin: 0 0 6px; letter-spacing: -.01em; }
+.cell p { margin: 0; font-size: 14.5px; color: var(--muted); }
 
-/* Story: the screenshot stays pinned and changes as you scroll the steps */
-.story-band { background: linear-gradient(180deg, var(--bg), #ffffff 12%, #ffffff 88%, var(--bg)); }
-.story { display: grid; grid-template-columns: minmax(0, .7fr) minmax(0, 1.55fr); gap: clamp(30px, 5vw, 90px); }
-.story-step { min-height: min(70vh, 720px); display: flex; flex-direction: column; justify-content: center; opacity: .28; transition: opacity .5s var(--ease); }
-.story-step.active { opacity: 1; }
-.story-step .num { font-weight: 800; color: var(--accent); font-size: 13px; letter-spacing: 2px; }
-.story-step h3 { font-size: clamp(26px, 2.6vw, 38px); margin: 10px 0 12px; letter-spacing: -.03em; line-height: 1.15; }
-.story-step p { color: var(--muted); font-size: 17px; margin: 0; max-width: 460px; }
-.story-step img { display: none; }
-.story-media { position: sticky; top: 15vh; height: min(70vh, 720px); display: flex; align-items: center; }
-.story-media .stack { position: relative; width: 100%; }
-.story-media img { border-radius: 18px; box-shadow: 0 40px 100px rgba(58, 120, 230, .25), 0 0 0 1px var(--line); width: 100%;
-  position: absolute; top: 0; left: 0; opacity: 0; transform: translateY(24px) scale(.98); transition: opacity .7s var(--ease), transform .7s var(--ease); }
-.story-media img:first-child { position: relative; }
-.story-media img.narrow { width: 46%; left: 27%; }
-.story-media img.show { opacity: 1; transform: none; }
-.story-dots { position: absolute; right: -26px; top: 50%; transform: translateY(-50%); display: grid; gap: 10px; }
-.story-dots i { width: 6px; height: 6px; border-radius: 3px; background: var(--subtle); transition: all .4s var(--ease); }
-.story-dots i.on { height: 22px; background: var(--accent); }
+/* Tour (tabs) */
+.tabs { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--bg-tint); border: 1px solid var(--line); margin-bottom: 22px; flex-wrap: wrap; }
+.tabs button { height: 32px; padding: 0 14px; border: 0; border-radius: 7px; background: transparent; font-weight: 600; font-size: 13.5px; font-family: inherit;
+  color: var(--muted); cursor: pointer; transition: background .2s, color .2s, box-shadow .2s; }
+.tabs button:hover { color: var(--text); }
+.tabs button.active { background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(15, 23, 41, .1); }
+.tour { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 40px; align-items: start; }
+.tour-copy h3 { font-size: 20px; margin: 0 0 8px; letter-spacing: -.02em; }
+.tour-copy p { margin: 0 0 16px; color: var(--muted); font-size: 15px; }
+.tour-copy ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; font-size: 14px; color: var(--muted); }
+.tour-copy li::before { content: "✓"; color: var(--success); font-weight: 700; margin-right: 8px; }
+.tour .window { margin: 0; max-width: none; }
+.tour .window img { animation: fade .45s var(--ease); }
+.tour .window img.narrow { max-width: 420px; margin: 0 auto; }
+@keyframes fade { from { opacity: 0; transform: translateY(6px); } }
 
-/* Simulator: full-width dark band */
-.dark { background: radial-gradient(1000px 500px at 85% 0%, rgba(76, 141, 246, .35), transparent 60%),
-  radial-gradient(800px 500px at 0% 100%, rgba(139, 123, 255, .25), transparent 60%), linear-gradient(160deg, var(--navy), var(--navy-2));
-  color: #e9efff; }
-.dark .eyebrow { color: var(--accent-2); }
-.dark .lede { color: #9fb0d6; }
-.sim { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); border-top: 1px solid rgba(255, 255, 255, .12); }
-.sim > div { padding: 30px 0; }
-.sim > div + div { border-left: 1px solid rgba(255, 255, 255, .12); padding-left: clamp(20px, 3vw, 50px); }
-.sim > div:first-child { padding-right: clamp(20px, 3vw, 50px); }
-.sim-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
-.sim-head h3 { margin: 0; font-size: 17px; }
-.sim-head small { color: #8ea0c9; }
-.sim .btn.primary { padding: 10px 18px; font-size: 14px; }
-.file { display: flex; align-items: center; gap: 14px; padding: 14px 4px; border-bottom: 1px solid rgba(255, 255, 255, .08);
-  font-size: 15px; font-weight: 600; transition: color .4s; }
-.file .ic { font-size: 18px; width: 22px; text-align: center; }
-.file .tag { margin-left: auto; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: rgba(255, 255, 255, .08); color: #9fb0d6; }
-.file.honey .tag { background: rgba(242, 163, 58, .18); color: #ffc46b; }
-.file.locked { color: #ff8b98; animation: shake .45s; }
-.file.locked .tag { background: rgba(239, 91, 110, .2); color: #ff8b98; }
-@keyframes shake { 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
-.timeline { display: grid; min-height: 330px; align-content: start; }
-.event { display: flex; gap: 14px; align-items: flex-start; padding: 12px 0; border-bottom: 1px solid rgba(255, 255, 255, .08);
-  animation: slideIn .55s var(--ease); font-size: 14.5px; }
-.event .lv { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; flex: none; font-weight: 800; font-size: 13px; }
-.event b { display: block; color: #fff; }
-.event .sub { color: #8ea0c9; font-size: 12.5px; }
-.event.crit .lv { background: rgba(239, 91, 110, .2); color: #ff8b98; }
-.event.ok .lv { background: rgba(47, 191, 143, .2); color: #6ee0b4; }
-.event.info .lv { background: rgba(122, 169, 255, .2); color: var(--accent-2); }
-.empty-tl { color: #6f82ad; font-size: 14px; padding: 14px 0; }
-@keyframes slideIn { from { opacity: 0; transform: translateY(12px); } }
-.sim-status { display: flex; align-items: center; gap: 12px; margin-top: 22px; font-weight: 650; font-size: 15px; color: var(--accent-2); }
-.sim-status .ring { width: 22px; height: 22px; border-radius: 50%; border: 3px solid currentColor; border-top-color: transparent; animation: spin 1.2s linear infinite; flex: none; }
-.sim-status.alert { color: #ff8b98; }
+/* Simulator */
+.sim { border: 1px solid var(--line); border-radius: var(--radius); background: #fff; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); }
+.sim > div { padding: 20px 22px; }
+.sim > div + div { border-left: 1px solid var(--line); background: var(--bg-soft); }
+.sim-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.sim-head b { font-size: 14px; }
+.sim-head small { color: var(--subtle); font-size: 12.5px; }
+.file { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 14px; transition: color .3s; }
+.file:last-child { border-bottom: 0; }
+.file .tag { margin-left: auto; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--bg-tint); color: var(--muted); }
+.file.honey .tag { background: #fff3df; color: #b36f10; }
+.file.locked { color: var(--critical); animation: shake .4s; }
+.file.locked .tag { background: #fde7ea; color: var(--critical); }
+@keyframes shake { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+.timeline { min-height: 236px; }
+.event { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; animation: fade .4s var(--ease); }
+.event .lv { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; flex: none; font-weight: 800; font-size: 11px; margin-top: 1px; }
+.event b { display: block; font-weight: 600; }
+.event .sub { color: var(--subtle); font-size: 12px; }
+.event.crit .lv { background: #fde7ea; color: var(--critical); }
+.event.ok .lv { background: #dcf5ec; color: var(--success); }
+.event.info .lv { background: var(--accent-soft); color: var(--accent-deep); }
+.empty-tl { color: var(--subtle); font-size: 13.5px; padding: 8px 0; }
+.sim-status { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 13.5px; font-weight: 600; color: var(--accent-deep); }
+.sim-status .ring { width: 16px; height: 16px; border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent; animation: spin 1.2s linear infinite; }
+.sim-status.alert { color: var(--critical); }
 .sim-status.alert .ring { animation-duration: .5s; }
-.sim-note { color: #6f82ad; font-size: 13px; margin-top: 26px; }
 @keyframes spin { to { transform: rotate(360deg); } }
+.sim-foot { font-size: 12.5px; color: var(--subtle); margin-top: 12px; }
 
-/* Steps on a line: the numbers sit on the line, nothing clips them */
-.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: clamp(24px, 4vw, 70px); position: relative; }
-.steps::before { content: ""; position: absolute; top: 23px; left: 0; right: 0; height: 2px;
-  background: linear-gradient(90deg, var(--accent-2), var(--violet) 60%, transparent); opacity: .45; }
-.step .num { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 17px;
-  background: linear-gradient(135deg, var(--accent-2), var(--accent)); box-shadow: 0 0 0 8px var(--bg), 0 12px 24px rgba(76, 141, 246, .38);
-  margin-bottom: 26px; position: relative; }
-.step h3 { font-size: 21px; margin: 0 0 8px; }
-.step p { margin: 0; color: var(--muted); font-size: 16px; max-width: 360px; }
+/* Steps */
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px; counter-reset: s; }
+.step { padding-top: 18px; border-top: 1px solid var(--line-strong); }
+.step b { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; font-size: 12.5px; background: var(--text); color: #fff; margin-bottom: 12px; }
+.step h3 { font-size: 16px; margin: 0 0 6px; }
+.step p { margin: 0; font-size: 14.5px; color: var(--muted); }
 
 /* Live split */
-.split { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.3fr); gap: clamp(30px, 6vw, 100px); align-items: center; }
-.checks { list-style: none; padding: 0; margin: 28px 0 0; display: grid; gap: 18px; }
-.checks li { display: flex; gap: 14px; color: var(--muted); font-size: 16px; }
-.checks li b { color: var(--text); }
-.checks li::before { content: "✓"; flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
-  background: rgba(47, 191, 143, .14); color: var(--success); font-weight: 800; font-size: 13px; margin-top: 1px; }
-.browser { border-radius: 18px; overflow: hidden; background: #fff; box-shadow: 0 50px 110px rgba(58, 120, 230, .25), 0 0 0 1px var(--line);
-  transition: transform .6s var(--ease); }
-.browser:hover { transform: translateY(-6px); }
-.browser .bar { display: flex; align-items: center; gap: 8px; padding: 12px 14px; background: var(--tint); border-bottom: 1px solid var(--line); }
-.browser .bar i { width: 11px; height: 11px; border-radius: 50%; }
-.browser .bar i:nth-child(1) { background: #ff8a8a; } .browser .bar i:nth-child(2) { background: #ffd17a; } .browser .bar i:nth-child(3) { background: #7be0a4; }
-.browser .url { flex: 1; margin-left: 8px; padding: 6px 12px; border-radius: 9px; background: #fff; font-size: 12.5px; color: var(--muted);
-  border: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.browser .url b { color: var(--success); }
+.split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 56px; align-items: center; }
+.checks { list-style: none; padding: 0; margin: 22px 0 0; display: grid; gap: 12px; font-size: 15px; color: var(--muted); }
+.checks li { display: flex; gap: 10px; }
+.checks li::before { content: "✓"; color: var(--success); font-weight: 700; }
+.checks b { color: var(--text); font-weight: 600; }
+.split .window { margin: 0; }
+.url { flex: 1; margin-left: 10px; height: 22px; display: flex; align-items: center; padding: 0 10px; border-radius: 6px; background: #fff;
+  border: 1px solid var(--line); font-size: 11.5px; color: var(--subtle); white-space: nowrap; overflow: hidden; }
+.url b { color: var(--success); font-weight: 600; margin-right: 2px; }
 
 /* Privacy */
-.privacy-band { background: #fff; }
-.privacy { display: grid; grid-template-columns: repeat(4, 1fr); gap: clamp(24px, 3vw, 56px); }
-.privacy > div { padding-top: 26px; border-top: 2px solid var(--accent-soft); }
-.privacy .ic { font-size: 30px; }
-.privacy h3 { font-size: 19px; margin: 12px 0 8px; }
-.privacy p { margin: 0; color: var(--muted); font-size: 15px; }
-.honest { margin-top: clamp(56px, 7vw, 96px); display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 30px; align-items: start;
-  padding-top: clamp(40px, 5vw, 64px); border-top: 1px solid var(--line); }
-.honest .mark { font-size: 96px; line-height: .75; color: var(--accent-2); font-weight: 800; font-family: Georgia, serif; }
-.honest p { margin: 0 0 12px; font-size: clamp(18px, 1.7vw, 23px); line-height: 1.5; max-width: 980px; }
-.honest p + p { font-size: 16px; color: var(--muted); }
+.privacy { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; }
+.privacy h3 { font-size: 15.5px; margin: 10px 0 4px; }
+.privacy p { margin: 0; font-size: 14px; color: var(--muted); }
+.privacy .ic { font-size: 20px; }
+.callout { margin-top: 40px; padding: 18px 20px; border-radius: var(--radius); border: 1px solid var(--line); background: #fff;
+  display: flex; gap: 14px; font-size: 14.5px; color: var(--muted); }
+.callout b { color: var(--text); }
+.callout .ic { flex: none; width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--accent-soft); }
 
 /* FAQ */
-.faq-grid { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.4fr); gap: clamp(30px, 6vw, 100px); align-items: start; }
-.faq-grid .sticky { position: sticky; top: 110px; }
+.faq { max-width: 760px; margin: 0 auto; }
 .faq details { border-bottom: 1px solid var(--line); }
-.faq details:first-child { border-top: 1px solid var(--line); }
-.faq summary { cursor: pointer; font-weight: 650; font-size: 18px; list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 24px 0; }
+.faq summary { cursor: pointer; list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 18px 0; font-weight: 600; font-size: 15.5px; }
 .faq summary::-webkit-details-marker { display: none; }
-.faq summary::after { content: "+"; flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-size: 22px;
-  color: var(--accent-deep); background: var(--accent-soft); transition: transform .35s var(--ease), background .3s, color .3s; }
-.faq details[open] summary::after { transform: rotate(45deg); background: var(--accent); color: #fff; }
-.faq details p { color: var(--muted); margin: 0 0 24px; font-size: 16px; max-width: 760px; }
+.faq summary::after { content: ""; width: 9px; height: 9px; border-right: 2px solid var(--subtle); border-bottom: 2px solid var(--subtle);
+  transform: rotate(45deg) translateY(-3px); transition: transform .25s var(--ease); flex: none; }
+.faq details[open] summary::after { transform: rotate(-135deg) translateY(-1px); }
+.faq details p { margin: 0 0 18px; font-size: 14.5px; color: var(--muted); }
 
-/* Download band */
-.download { text-align: center; color: #fff; overflow: hidden;
-  background: radial-gradient(900px 500px at 20% 0%, rgba(255, 255, 255, .25), transparent 60%),
-    radial-gradient(700px 500px at 100% 100%, rgba(139, 123, 255, .5), transparent 60%),
-    linear-gradient(135deg, var(--accent-2), var(--accent) 45%, var(--accent-deep)); }
-.download h2 { color: #fff; font-size: clamp(38px, 6vw, 84px); margin: 18px auto 16px; }
-.download p { color: rgba(255, 255, 255, .85); font-size: 18px; margin: 0 auto 36px; max-width: 560px; }
-.download .logo { width: 84px; margin: 0 auto; filter: drop-shadow(0 16px 26px rgba(15, 26, 54, .35)); }
-.download .logo.in { animation: float 5s ease-in-out infinite; }
-.download .btn.light { background: #fff; color: var(--accent-deep); border: none; box-shadow: 0 16px 40px rgba(15, 26, 54, .25); }
-.download .btn.ghost { background: rgba(255, 255, 255, .14); color: #fff; border-color: rgba(255, 255, 255, .35); }
-.download .meta { justify-content: center; color: rgba(255, 255, 255, .8); }
-.download .cta { justify-content: center; }
+/* CTA */
+.cta-box { position: relative; overflow: hidden; text-align: center; padding: 64px 24px; border-radius: 16px; border: 1px solid var(--line);
+  background: radial-gradient(60% 120% at 50% 0%, rgba(122, 169, 255, .25), transparent 70%), var(--bg-soft); }
+.cta-box h2 { margin-bottom: 10px; }
+.cta-box p { color: var(--muted); margin: 0 0 26px; }
+.cta-box .actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.cta-box .meta { margin-top: 16px; font-size: 13px; color: var(--subtle); }
 
-footer { background: var(--navy); color: #8ea0c9; padding: 40px 0; font-size: 14px; }
-footer .wrap { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; align-items: center; }
-footer .brand { color: #fff; margin: 0; font-size: 16px; }
-footer .brand img { width: 26px; height: 26px; }
-footer .flinks { display: flex; gap: 26px; flex-wrap: wrap; }
-footer a:hover { color: #fff; }
+/* Footer */
+footer { border-top: 1px solid var(--line); padding: 48px 0 40px; font-size: 14px; color: var(--muted); }
+footer .cols { display: grid; grid-template-columns: 1.5fr repeat(3, 1fr); gap: 32px; }
+footer h4 { font-size: 13px; color: var(--text); margin: 0 0 12px; font-weight: 600; }
+footer ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+footer a:hover { color: var(--text); }
+footer .legal { margin-top: 36px; padding-top: 20px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--subtle);
+  display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 
-/* ---------- Reveal on scroll ---------- */
-.reveal { opacity: 0; transform: translateY(34px); transition: opacity 1s var(--ease), transform 1s var(--ease); }
+/* Reveal */
+.reveal { opacity: 0; transform: translateY(14px); transition: opacity .7s var(--ease), transform .7s var(--ease); }
 .reveal.in { opacity: 1; transform: none; }
-.d1 { transition-delay: .1s; } .d2 { transition-delay: .2s; } .d3 { transition-delay: .3s; }
 
-@media (max-width: 1180px) {
-  .features { grid-template-columns: repeat(2, 1fr); }
-  .chip { display: none; }
-}
-@media (max-width: 980px) {
-  .links { display: none; }
-  .hero { min-height: auto; padding-top: 110px; }
-  .hero .wrap, .head, .split, .faq-grid, .story { grid-template-columns: 1fr; }
-  .head { gap: 0; }
-  .head .lede { justify-self: start; }
-  .hero-visual { margin-right: 0; }
-  .hero-visual .screen { border-radius: 18px; transform: none; }
-  .scroll-cue { display: none; }
-  .stats, .privacy { grid-template-columns: repeat(2, 1fr); row-gap: 36px; }
-  .stat:nth-child(3) { border-left: 0; padding-left: 0; }
-  .story-media { display: none; }
-  .story-step { min-height: auto; opacity: 1; padding: 34px 0; border-top: 1px solid var(--line); }
-  .story-step img { display: block; margin-top: 22px; border-radius: 14px; box-shadow: 0 24px 60px rgba(58, 120, 230, .2), 0 0 0 1px var(--line); }
-  .story-step img.narrow { max-width: 420px; }
-  .sim { grid-template-columns: 1fr; }
-  .sim > div + div { border-left: 0; padding-left: 0; border-top: 1px solid rgba(255, 255, 255, .12); }
-  .sim > div:first-child { padding-right: 0; }
-  .faq-grid .sticky { position: static; }
+@media (max-width: 960px) {
+  .nav-links { display: none; }
+  .grid { grid-template-columns: repeat(2, 1fr); }
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  .stat:nth-child(3) { border-left: 0; }
+  .stat:nth-child(n+3) { border-top: 1px solid var(--line); }
+  .tour, .split { grid-template-columns: 1fr; gap: 28px; }
+  .privacy { grid-template-columns: repeat(2, 1fr); }
+  footer .cols { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 640px) {
-  .features, .stats, .privacy, .steps { grid-template-columns: 1fr; }
-  .stat { border-left: 0; padding-left: 0; }
-  .steps::before { display: none; }
-  .honest { grid-template-columns: 1fr; gap: 6px; }
-  nav .btn.small:not(.primary) { display: none; }
-  .meta { gap: 10px; }
-  h1 { letter-spacing: -.035em; }
+  section { padding: 68px 0; }
+  .hero { padding: 56px 0 40px; }
+  .hero p.lead { font-size: 16.5px; }
+  .grid, .steps, .privacy { grid-template-columns: 1fr; }
+  .sim { grid-template-columns: 1fr; }
+  .sim > div + div { border-left: 0; border-top: 1px solid var(--line); }
+  .nav-actions .gh { display: none; }
+  .cmd { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
@@ -335,259 +260,245 @@ footer a:hover { color: #fff; }
 </head>
 <body>
 
-<nav id="nav">
-  <div class="wrap">
-    <a class="brand" href="#top"><img src="logo.svg" alt=""> SecureVault</a>
-    <div class="links" id="links">
+<header class="nav" id="nav">
+  <div class="container">
+    <a class="brand" href="#"><img src="logo.svg" alt=""> SecureVault</a>
+    <nav class="nav-links" id="links">
       <a href="#features">Features</a>
       <a href="#tour">Tour</a>
-      <a href="#simulator">Try it</a>
+      <a href="#simulator">Demo</a>
       <a href="#privacy">Privacy</a>
       <a href="#faq">FAQ</a>
+    </nav>
+    <div class="nav-actions">
+      <a class="btn sm gh" href="https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.7 18.3 5 18.3 5c.7 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5z"/></svg>
+        GitHub
+      </a>
+      <a class="btn sm primary" href="#download">Download</a>
     </div>
-    <a class="btn small" href="https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System" target="_blank" rel="noopener">
-      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.7 18.3 5 18.3 5c.7 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5z"/></svg>
-      <span>GitHub</span>
-    </a>
-    <a class="btn small primary" href="#download">Download</a>
   </div>
-  <div class="progress" id="progress"></div>
-</nav>
+</header>
 
-<header class="hero" id="top">
-  <div class="wrap">
-    <div class="hero-copy">
-      <span class="pill"><b>v<span class="ver">2.1.2</span></b> Antivirus scanner &amp; privacy-first live streaming</span>
-      <h1>Calm, free protection against <span class="rotator" id="rotator"><span class="grad">ransomware.</span><span class="grad next">malware.</span><span class="grad next">fake invoices.</span><span class="grad next">sneaky scripts.</span></span></h1>
-      <p class="lede">SecureVault watches the folders you care about, catches ransomware the moment it strikes,
-        scans for malware and lets you check on your PC from your phone. Free, with every line of code on GitHub.</p>
-      <div class="cta">
+<main>
+  <section class="hero">
+    <div class="container">
+      <a class="announce" href="#tour"><b>New</b>Antivirus scanner &amp; private live streaming →</a>
+      <h1>Calm, free protection<br>against <span class="rotator" id="rotator"><span class="grad">ransomware</span><span class="grad next">malware</span><span class="grad next">fake invoices</span><span class="grad next">sneaky scripts</span></span></h1>
+      <p class="lead">SecureVault watches your folders, catches ransomware the moment it strikes, scans for malware and lets you check on your PC from your phone.</p>
+      <div class="actions">
         <a class="btn primary" href="https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System/releases/latest/download/SecureVault-Windows.zip">
           <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3V5.5zm0 13 7.5 1.1v-7H3v5.9zm8.4 1.2L21 21V12.6h-9.6v7.1zM11.4 4.3V11.5H21V3l-9.6 1.3z"/></svg>
           Download for Windows
         </a>
-        <a class="btn" href="#simulator">▶ Watch it stop an attack</a>
-      </div>
-      <div class="meta"><span><i></i>Version <span class="ver">2.1.2</span></span><span>Windows 10 &amp; 11</span><span>No install · No account · No tracking</span></div>
-    </div>
-    <div class="hero-visual" id="hero-visual">
-      <div class="chip c1"><span class="dot">🚨</span><div>Threat detected<small>Thesis.docx → .locked</small></div></div>
-      <div class="chip c2"><span class="dot">📡</span><div>Live · 2 watching<small>Link closes in 2 h</small></div></div>
-      <div class="chip c3"><span class="dot">🧲</span><div>Honeypot armed<small>Decoy in place</small></div></div>
-      <div class="screen"><img src="dashboard.png" alt="SecureVault dashboard showing protection status, stats and live activity" width="1800" height="1055"></div>
-    </div>
-  </div>
-  <div class="scroll-cue" aria-hidden="true"></div>
-</header>
-
-<div class="ticker" aria-hidden="true"><div class="track">
-  <span>Real-time file monitoring</span><span>Honeypot decoys</span><span>Ransomware heuristics</span><span>On-access scanning</span>
-  <span>Quarantine &amp; restore</span><span>Microsoft Defender engine</span><span>YARA rules</span><span>Live streaming</span>
-  <span>Evidence reports</span><span>No telemetry</span>
-  <span>Real-time file monitoring</span><span>Honeypot decoys</span><span>Ransomware heuristics</span><span>On-access scanning</span>
-  <span>Quarantine &amp; restore</span><span>Microsoft Defender engine</span><span>YARA rules</span><span>Live streaming</span>
-  <span>Evidence reports</span><span>No telemetry</span>
-</div></div>
-
-<section>
-  <div class="wrap">
-    <div class="stats">
-      <div class="stat reveal"><b data-count="51">0</b><span>automated tests run on every change</span></div>
-      <div class="stat reveal d1"><b data-count="19163">0</b><span>files in our test scan, with 0 false positives</span></div>
-      <div class="stat reveal d2"><b data-count="5">0</b><span>detection layers working together</span></div>
-      <div class="stat reveal d3"><b data-count="0">0</b><span>trackers, ads or accounts. Ever.</span></div>
-    </div>
-  </div>
-</section>
-
-<section id="features" style="padding-top: 0">
-  <div class="wrap">
-    <div class="head">
-      <div class="reveal"><span class="eyebrow">Features</span><h2>Everything ransomware hates.</h2></div>
-      <p class="lede reveal d1">Layered detection that spots the patterns ransomware can't hide, explained in plain language instead of jargon.</p>
-    </div>
-    <div class="features">
-      <div class="feature reveal"><span class="ic">👁️</span><h3>Real-time watcher</h3><p>Every create, change, delete and rename in your protected folder, checked against a SHA-256 baseline the instant it happens.</p></div>
-      <div class="feature reveal d1"><span class="ic">🔒</span><h3>Ransomware heuristics</h3><p>Critical alerts for files renamed to <code>.locked</code>, <code>.encrypted</code> and friends, and for bursts of mass changes.</p></div>
-      <div class="feature reveal d2"><span class="ic">🧲</span><h3>Honeypot decoy</h3><p>A tempting fake file no honest program touches. If anything modifies it, you know immediately.</p></div>
-      <div class="feature reveal d3"><span class="ic">🦠</span><h3>Antivirus scanner</h3><p>Quick, full and custom scans with signatures, heuristics, YARA and the Microsoft Defender engine.</p></div>
-      <div class="feature reveal"><span class="ic">⚡</span><h3>On-access scanning</h3><p>New files are scanned as they land, so a disguised <code>invoice.pdf.exe</code> never slips by.</p></div>
-      <div class="feature reveal d1"><span class="ic">🗄️</span><h3>Quarantine</h3><p>Threats are neutralized so they can't run. Restore anything you trust in one click.</p></div>
-      <div class="feature reveal d2"><span class="ic">📡</span><h3>Live streaming</h3><p>Watch status, alerts and system load from any browser, through private links that expire.</p></div>
-      <div class="feature reveal d3"><span class="ic">📊</span><h3>Evidence reports</h3><p>Export a clean HTML report of every event, ready to share with IT or your insurer.</p></div>
-    </div>
-  </div>
-</section>
-
-<section id="tour" class="story-band">
-  <div class="wrap">
-    <div class="head">
-      <div class="reveal"><span class="eyebrow">Tour</span><h2>Beautifully simple.</h2></div>
-      <p class="lede reveal d1">A soft, uncluttered dashboard with gentle animations that tell you exactly what's going on. Scroll to look around.</p>
-    </div>
-    <div class="story">
-      <div class="story-steps">
-        <div class="story-step active" data-i="0"><span class="num">01 · PROTECTION</span><h3>Calm when all is well.</h3>
-          <p>The shield ring orbits while real-time monitoring keeps watch over your folder, with your baseline, honeypot and alerts at a glance.</p>
-          <img src="dashboard.png" alt="Protection dashboard" loading="lazy"></div>
-        <div class="story-step" data-i="1"><span class="num">02 · THREAT</span><h3>Loud when it matters.</h3>
-          <p>Files renamed to <code>.locked</code>, a touched honeypot, a burst of changes: the ring turns red within seconds and every step is explained.</p>
-          <img src="threat.png" alt="Threat detected" loading="lazy"></div>
-        <div class="story-step" data-i="2"><span class="num">03 · ANTIVIRUS</span><h3>Scans that explain themselves.</h3>
-          <p>Every finding says why it was flagged, like a double extension or a program pretending to be a photo, with one-click quarantine.</p>
-          <img src="antivirus.png" alt="Antivirus results" loading="lazy"></div>
-        <div class="story-step" data-i="3"><span class="num">04 · QUARANTINE</span><h3>Nothing lost by mistake.</h3>
-          <p>Quarantined files are neutralized and can't run. Restore anything you trust, or delete it for good, always with a confirmation.</p>
-          <img src="quarantine.png" alt="Quarantine" loading="lazy"></div>
-        <div class="story-step" data-i="4"><span class="num">05 · GO LIVE</span><h3>Share safely, on your terms.</h3>
-          <p>Privacy mode hides your folders and user name, and every sharing option asks first. Internet links close themselves after 2 hours.</p>
-          <img class="narrow" src="stream-dialog.png" alt="Go live dialog" loading="lazy"></div>
-      </div>
-      <div class="story-media" aria-hidden="true">
-        <div class="stack" id="story-stack">
-          <img class="show" src="dashboard.png" alt=""><img src="threat.png" alt=""><img src="antivirus.png" alt=""><img src="quarantine.png" alt=""><img class="narrow" src="stream-dialog.png" alt="">
-          <div class="story-dots" id="story-dots"><i class="on"></i><i></i><i></i><i></i><i></i></div>
+        <div class="cmd"><span id="cmd-text">python main.py --gui</span>
+          <button id="copy" type="button" aria-label="Copy command" title="Copy">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+          </button>
         </div>
       </div>
-    </div>
-  </div>
-</section>
+      <p class="note">Version <span class="ver">2.1.0</span> · Windows 10 &amp; 11 · No install, no account, no tracking</p>
 
-<section id="simulator" class="dark">
-  <div class="wrap">
-    <div class="head">
-      <div class="reveal"><span class="eyebrow">Try it</span><h2>Watch it stop an attack.</h2></div>
-      <p class="lede reveal d1">Press play to simulate ransomware hitting a folder and see what SecureVault does, second by second.</p>
-    </div>
-    <div class="sim reveal">
-      <div>
-        <div class="sim-head"><div><h3>📁 Documents</h3><small>Protected folder</small></div>
-          <button class="btn primary" id="sim-play">▶ Simulate attack</button></div>
-        <div id="files"></div>
-      </div>
-      <div>
-        <div class="sim-head"><div><h3>🛡️ SecureVault</h3><small>Activity</small></div><small id="sim-clock">0.0 s</small></div>
-        <div class="timeline" id="timeline"><div class="empty-tl">Waiting for something to happen…</div></div>
-        <div class="sim-status" id="sim-status"><span class="ring"></span><span id="sim-text">Protected · watching 5 files</span></div>
+      <div class="window reveal">
+        <div class="glow"></div>
+        <div class="bar"><i></i><i></i><i></i><span>SecureVault — Protection</span></div>
+        <img src="dashboard.png" alt="SecureVault dashboard" width="1800" height="1055">
       </div>
     </div>
-    <p class="sim-note">This simulation runs only in your browser. No files are touched.</p>
-  </div>
-</section>
+  </section>
 
-<section>
-  <div class="wrap">
-    <div class="head">
-      <div class="reveal"><span class="eyebrow">Get started</span><h2>Protected in three steps.</h2></div>
-      <p class="lede reveal d1">No installer, no account, no admin rights. Extract the zip and run SecureVault.exe.</p>
-    </div>
-    <div class="steps">
-      <div class="step reveal"><div class="num">1</div><h3>Pick a folder</h3><p>Choose what to protect, like Documents or your projects.</p></div>
-      <div class="step reveal d1"><div class="num">2</div><h3>Create a baseline</h3><p>SecureVault fingerprints every file and plants a honeypot decoy beside them.</p></div>
-      <div class="step reveal d2"><div class="num">3</div><h3>Switch on protection</h3><p>Flip the real-time monitor on. That's it: SecureVault keeps watch, even from the tray.</p></div>
+  <div class="trust">
+    <div class="container">
+      <p>Built on proven, open technology</p>
+      <ul><li>SHA-256 integrity</li><li>Microsoft Defender engine</li><li>YARA rules</li><li>watchdog</li><li>PyQt6</li><li>Cloudflare tunnels</li></ul>
     </div>
   </div>
-</section>
 
-<section id="live" style="padding-top: 0">
-  <div class="wrap split">
-    <div class="reveal">
-      <span class="eyebrow">Live stream</span>
-      <h2>Check on your PC from anywhere.</h2>
-      <p class="lede">Click <b>Go live</b> and SecureVault streams its status, alerts and a live CPU chart to a private web page.</p>
-      <ul class="checks">
-        <li><span><b>This PC, your Wi-Fi or the internet.</b> Internet sharing uses a secure Cloudflare tunnel, with no account or router setup.</span></li>
-        <li><span><b>Private by design.</b> 128-bit links that change every time, privacy mode that hides your folders, and internet links that close after 2 hours.</span></li>
-        <li><span><b>You stay in control.</b> A notice whenever someone opens your stream, and one click revokes every link.</span></li>
-      </ul>
-    </div>
-    <div class="browser reveal d1">
-      <div class="bar"><i></i><i></i><i></i><div class="url"><b>🔒 https://</b>calm-river.trycloudflare.com/?token=••••••••••</div></div>
-      <img src="live-stream.png" alt="SecureVault Live web viewer" loading="lazy">
-    </div>
-  </div>
-</section>
-
-<section id="privacy" class="privacy-band">
-  <div class="wrap">
-    <div class="head">
-      <div class="reveal"><span class="eyebrow">Privacy</span><h2>Safety first, always.</h2></div>
-      <p class="lede reveal d1">Built so your personal things stay yours: on your PC, under your control.</p>
-    </div>
-    <div class="privacy">
-      <div class="reveal"><span class="ic">🙈</span><h3>No tracking</h3><p>No accounts, ads, analytics or telemetry. Not even on this website.</p></div>
-      <div class="reveal d1"><span class="ic">💻</span><h3>Stays on your PC</h3><p>Logs, baselines and quarantine live in your own profile folder.</p></div>
-      <div class="reveal d2"><span class="ic">✋</span><h3>Nothing auto-deleted</h3><p>Quarantine is reversible, and restore and delete always ask first.</p></div>
-      <div class="reveal d3"><span class="ic">🔐</span><h3>Verified builds</h3><p>Built by GitHub from public code, with a SHA-256 checksum for every release.</p></div>
-    </div>
-    <div class="honest reveal">
-      <span class="mark">“</span>
-      <div>
-        <p>SecureVault doesn't replace a full commercial antivirus suite. Windows already includes an excellent free one, <b>Microsoft Defender</b>, so keep it on.</p>
-        <p>SecureVault adds what Defender doesn't focus on: ransomware-specific monitoring, honeypots, clear explanations and a calm interface. It even uses Defender as a second engine for deep scans.</p>
+  <section id="features">
+    <div class="container">
+      <div class="section-head reveal">
+        <p class="kicker">Features</p>
+        <h2>Everything ransomware hates.</h2>
+        <p>Layered detection that spots the patterns ransomware can't hide, explained in plain language.</p>
+      </div>
+      <div class="stats reveal">
+        <div class="stat"><b data-count="51">0</b><span>automated tests</span></div>
+        <div class="stat"><b data-count="19163">0</b><span>files scanned, 0 false positives</span></div>
+        <div class="stat"><b data-count="5">0</b><span>detection layers</span></div>
+        <div class="stat"><b data-count="0">0</b><span>trackers or accounts</span></div>
+      </div>
+      <div class="grid reveal" style="margin-top: 32px">
+        <div class="cell"><div class="ic">👁️</div><h3>Real-time watcher</h3><p>Every change in your protected folder, checked against a SHA-256 baseline as it happens.</p></div>
+        <div class="cell"><div class="ic">🔒</div><h3>Ransomware heuristics</h3><p>Alerts for files renamed to <code>.locked</code> and friends, and for bursts of mass changes.</p></div>
+        <div class="cell"><div class="ic">🧲</div><h3>Honeypot decoy</h3><p>A fake file no honest program touches. If anything modifies it, you know immediately.</p></div>
+        <div class="cell"><div class="ic">🦠</div><h3>Antivirus scanner</h3><p>Quick, full and custom scans with signatures, heuristics, YARA and Microsoft Defender.</p></div>
+        <div class="cell"><div class="ic">⚡</div><h3>On-access scanning</h3><p>New files are scanned as they land, so <code>invoice.pdf.exe</code> never slips by.</p></div>
+        <div class="cell"><div class="ic">🗄️</div><h3>Quarantine</h3><p>Threats are neutralized so they can't run. Restore anything you trust in one click.</p></div>
+        <div class="cell"><div class="ic">📡</div><h3>Live streaming</h3><p>Watch status and alerts from any browser, through private links that expire.</p></div>
+        <div class="cell"><div class="ic">📊</div><h3>Evidence reports</h3><p>Export a clean HTML report of every event, ready for IT or your insurer.</p></div>
+        <div class="cell"><div class="ic">🔐</div><h3>Private by default</h3><p>No telemetry. Your files, logs and quarantine never leave your PC.</p></div>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<section id="faq">
-  <div class="wrap faq-grid">
-    <div class="sticky reveal">
-      <span class="eyebrow">FAQ</span>
-      <h2>Questions, answered.</h2>
-      <p class="lede">Something else? Ask on <a href="https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System/issues" style="color:var(--accent-deep);font-weight:600">GitHub</a>.</p>
+  <section id="tour" class="soft">
+    <div class="container">
+      <div class="section-head reveal">
+        <p class="kicker">Tour</p>
+        <h2>Beautifully simple.</h2>
+        <p>A calm dashboard that tells you exactly what's going on.</p>
+      </div>
+      <div class="tabs reveal" id="tabs" role="tablist">
+        <button class="active" data-i="0">Protection</button><button data-i="1">Threat</button><button data-i="2">Antivirus</button><button data-i="3">Quarantine</button><button data-i="4">Go live</button>
+      </div>
+      <div class="tour reveal">
+        <div class="tour-copy" id="tour-copy"></div>
+        <div class="window"><div class="bar"><i></i><i></i><i></i><span id="tour-title">SecureVault</span></div><img id="tour-img" src="dashboard.png" alt=""></div>
+      </div>
     </div>
-    <div class="faq reveal d1">
-      <details><summary>Is SecureVault really free?</summary>
-        <p>Yes. There are no ads, no account and no subscriptions, and the full source code is public on GitHub.</p></details>
-      <details><summary>Windows says "Windows protected your PC". Is that normal?</summary>
-        <p>Yes. SmartScreen shows that for new apps that aren't code-signed with a paid certificate. Verify the checksum (see below), then click <b>More info</b> and <b>Run anyway</b>.</p></details>
-      <details><summary>How do I know my download is genuine?</summary>
-        <p>Only download SecureVault from this website or its GitHub Releases page. Each release lists the zip's SHA-256 checksum
-          (also in <code>SHA256SUMS.txt</code>). In PowerShell, run <code>(Get-FileHash .\SecureVault-Windows.zip).Hash</code>
-          and check that it matches. Every release is built automatically from the public source code by GitHub.</p></details>
-      <details><summary>How do I install it?</summary>
-        <p>Download the zip, extract it anywhere (for example <code>Documents\SecureVault</code>) and run <code>SecureVault.exe</code>. No installer and no admin rights needed.
-          Your settings, logs and quarantine live in <code>%LOCALAPPDATA%\SecureVault</code>.</p></details>
-      <details><summary>Does my data leave my computer?</summary>
-        <p>No. There are no accounts, ads, analytics or telemetry, and everything runs locally. The only exception is the live stream, and only while you
-          have it on: viewers with your private link see its status page, with folder paths and your user name hidden by default. Internet links close
-          automatically after 2 hours, and SecureVault tells you whenever someone opens your stream.</p></details>
-      <details><summary>How do I watch from my phone?</summary>
-        <p>Click <b>Go live</b>, then turn on <b>Allow devices on my network</b> (same Wi-Fi) or <b>Share over the internet</b> (anywhere).
-          Internet sharing needs Cloudflare's free tool: <code>winget install Cloudflare.cloudflared</code>.</p></details>
-      <details><summary>Found a security problem?</summary>
-        <p>Please report it privately through <a href="https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System/security/advisories/new" style="color:var(--accent-deep);font-weight:600">GitHub's private vulnerability reporting</a> rather than a public issue.</p></details>
-    </div>
-  </div>
-</section>
+  </section>
 
-<section id="download" class="download">
-  <div class="wrap">
-    <img class="logo reveal" src="logo.svg" alt="">
-    <h2 class="reveal">Ready when you are.</h2>
-    <p class="reveal d1">Download SecureVault for Windows 10 and 11. Extract, run, protected.</p>
-    <div class="cta reveal d2">
-      <a class="btn light" href="https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System/releases/latest/download/SecureVault-Windows.zip">
-        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3V5.5zm0 13 7.5 1.1v-7H3v5.9zm8.4 1.2L21 21V12.6h-9.6v7.1zM11.4 4.3V11.5H21V3l-9.6 1.3z"/></svg>
-        Download for Windows
-      </a>
-      <a class="btn ghost" href="https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System/releases" target="_blank" rel="noopener">All releases &amp; checksums</a>
+  <section id="simulator">
+    <div class="container">
+      <div class="section-head reveal">
+        <p class="kicker">Demo</p>
+        <h2>Watch it stop an attack.</h2>
+        <p>Simulate ransomware hitting a folder and see what SecureVault does, second by second.</p>
+      </div>
+      <div class="sim reveal">
+        <div>
+          <div class="sim-head"><div><b>📁 Documents</b><br><small>Protected folder</small></div>
+            <button class="btn sm primary" id="sim-play" type="button">▶ Simulate attack</button></div>
+          <div id="files"></div>
+        </div>
+        <div>
+          <div class="sim-head"><div><b>🛡️ SecureVault</b><br><small>Activity</small></div><small id="sim-clock">0.0 s</small></div>
+          <div class="timeline" id="timeline"><div class="empty-tl">Waiting for something to happen…</div></div>
+          <div class="sim-status" id="sim-status"><span class="ring"></span><span id="sim-text">Protected · watching 5 files</span></div>
+        </div>
+      </div>
+      <p class="sim-foot">Runs only in your browser. No files are touched.</p>
     </div>
-    <div class="meta reveal d3"><span>Version <span class="ver">2.1.2</span></span><span id="size">≈ 36 MB</span><span>Windows 10 &amp; 11</span></div>
-  </div>
-</section>
+  </section>
+
+  <section class="soft">
+    <div class="container">
+      <div class="section-head reveal">
+        <p class="kicker">Get started</p>
+        <h2>Protected in three steps.</h2>
+        <p>No installer, no account, no admin rights.</p>
+      </div>
+      <div class="steps reveal">
+        <div class="step"><b>1</b><h3>Pick a folder</h3><p>Choose what to protect, like Documents or your projects.</p></div>
+        <div class="step"><b>2</b><h3>Create a baseline</h3><p>SecureVault fingerprints every file and plants a honeypot decoy.</p></div>
+        <div class="step"><b>3</b><h3>Switch on protection</h3><p>Flip the real-time monitor on. SecureVault keeps watch, even from the tray.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="live">
+    <div class="container split">
+      <div class="reveal">
+        <p class="kicker">Live stream</p>
+        <h2>Check on your PC from anywhere.</h2>
+        <p class="muted" style="margin:0">Click <b>Go live</b> and SecureVault streams its status, alerts and a live CPU chart to a private web page.</p>
+        <ul class="checks">
+          <li><span><b>This PC, your Wi-Fi or the internet</b>, through a secure Cloudflare tunnel.</span></li>
+          <li><span><b>Private by design:</b> 128-bit links, hidden folder paths, links that expire after 2 hours.</span></li>
+          <li><span><b>You stay in control:</b> a notice whenever someone opens your stream.</span></li>
+        </ul>
+      </div>
+      <div class="window reveal">
+        <div class="bar"><i></i><i></i><i></i><div class="url"><b>https://</b>calm-river.trycloudflare.com/?token=••••••</div></div>
+        <img src="live-stream.png" alt="SecureVault Live web viewer" loading="lazy">
+      </div>
+    </div>
+  </section>
+
+  <section id="privacy" class="soft">
+    <div class="container">
+      <div class="section-head reveal">
+        <p class="kicker">Privacy</p>
+        <h2>Safety first, always.</h2>
+        <p>Built so your personal things stay yours.</p>
+      </div>
+      <div class="privacy reveal">
+        <div><span class="ic">🙈</span><h3>No tracking</h3><p>No accounts, ads, analytics or telemetry. Not even on this site.</p></div>
+        <div><span class="ic">💻</span><h3>Stays on your PC</h3><p>Logs, baselines and quarantine live in your own profile folder.</p></div>
+        <div><span class="ic">✋</span><h3>Nothing auto-deleted</h3><p>Quarantine is reversible; restore and delete always ask first.</p></div>
+        <div><span class="ic">🔏</span><h3>Verified builds</h3><p>Built by GitHub from public code, with a SHA-256 checksum per release.</p></div>
+      </div>
+      <div class="callout reveal">
+        <span class="ic">🤝</span>
+        <span><b>Honest note:</b> SecureVault doesn't replace a full antivirus suite. Keep <b>Microsoft Defender</b> on. SecureVault adds
+          ransomware-specific monitoring, honeypots and clear explanations, and uses Defender as a second engine.</span>
+      </div>
+    </div>
+  </section>
+
+  <section id="faq">
+    <div class="container">
+      <div class="section-head center reveal">
+        <p class="kicker">FAQ</p>
+        <h2>Questions, answered.</h2>
+      </div>
+      <div class="faq reveal">
+        <details><summary>Is SecureVault really free?</summary>
+          <p>Yes. There are no ads, no account and no subscriptions, and the full source code is public on GitHub.</p></details>
+        <details><summary>Windows says "Windows protected your PC". Is that normal?</summary>
+          <p>Yes. SmartScreen shows that for apps that aren't code-signed with a paid certificate. Verify the checksum, then click <b>More info → Run anyway</b>.</p></details>
+        <details><summary>How do I know my download is genuine?</summary>
+          <p>Only download from this site or GitHub Releases. Each release lists its SHA-256 checksum (also in <code>SHA256SUMS.txt</code>).
+            In PowerShell, run <code>(Get-FileHash .\SecureVault-Windows.zip).Hash</code> and check that it matches.</p></details>
+        <details><summary>How do I install it?</summary>
+          <p>Extract the zip anywhere and run <code>SecureVault.exe</code>. No installer or admin rights. Your data lives in <code>%LOCALAPPDATA%\SecureVault</code>.</p></details>
+        <details><summary>Does my data leave my computer?</summary>
+          <p>No. Everything runs locally. The only exception is the live stream, and only while it's on: viewers with your private link see its
+            status page, with folder paths and your user name hidden by default. Internet links close after 2 hours.</p></details>
+        <details><summary>How do I watch from my phone?</summary>
+          <p>Click <b>Go live</b>, then turn on <b>Allow devices on my network</b> or <b>Share over the internet</b>.
+            Internet sharing needs Cloudflare's free tool: <code>winget install Cloudflare.cloudflared</code>.</p></details>
+        <details><summary>Found a security problem?</summary>
+          <p>Please report it privately through <a href="https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System/security/advisories/new" style="color:var(--accent-deep)">GitHub's private vulnerability reporting</a>.</p></details>
+      </div>
+    </div>
+  </section>
+
+  <section id="download" style="padding-top: 0">
+    <div class="container">
+      <div class="cta-box reveal">
+        <img src="logo.svg" alt="" width="44" height="44" style="margin: 0 auto 16px">
+        <h2>Ready when you are.</h2>
+        <p>Download SecureVault for Windows 10 and 11. Extract, run, protected.</p>
+        <div class="actions">
+          <a class="btn primary" href="https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System/releases/latest/download/SecureVault-Windows.zip">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3V5.5zm0 13 7.5 1.1v-7H3v5.9zm8.4 1.2L21 21V12.6h-9.6v7.1zM11.4 4.3V11.5H21V3l-9.6 1.3z"/></svg>
+            Download for Windows
+          </a>
+          <a class="btn" href="https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System/releases" target="_blank" rel="noopener">Releases &amp; checksums</a>
+        </div>
+        <p class="meta">Version <span class="ver">2.1.0</span> · <span id="size">≈ 34 MB</span></p>
+      </div>
+    </div>
+  </section>
+</main>
 
 <footer>
-  <div class="wrap">
-    <span class="brand"><img src="logo.svg" alt=""> SecureVault</span>
-    <span>Made with 🛡️ by Kiran Gautham</span>
-    <div class="flinks">
-      <a href="https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System" target="_blank" rel="noopener">Source</a>
-      <a href="https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System/releases" target="_blank" rel="noopener">Releases</a>
-      <a href="https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System/blob/main/SECURITY.md" target="_blank" rel="noopener">Security</a>
-      <a href="#faq">FAQ</a>
+  <div class="container">
+    <div class="cols">
+      <div><a class="brand" href="#"><img src="logo.svg" alt=""> SecureVault</a>
+        <p style="margin:12px 0 0; max-width: 280px">Free ransomware detection and prevention for Windows.</p></div>
+      <div><h4>Product</h4><ul><li><a href="#features">Features</a></li><li><a href="#tour">Tour</a></li><li><a href="#simulator">Demo</a></li><li><a href="#download">Download</a></li></ul></div>
+      <div><h4>Resources</h4><ul>
+        <li><a href="https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System" target="_blank" rel="noopener">Source code</a></li>
+        <li><a href="https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System/releases" target="_blank" rel="noopener">Releases</a></li>
+        <li><a href="#faq">FAQ</a></li></ul></div>
+      <div><h4>Trust</h4><ul>
+        <li><a href="#privacy">Privacy</a></li>
+        <li><a href="https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System/blob/main/SECURITY.md" target="_blank" rel="noopener">Security policy</a></li>
+        <li><a href="https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System/security/advisories/new" target="_blank" rel="noopener">Report a vulnerability</a></li></ul></div>
     </div>
+    <div class="legal"><span>Made by Kiran Gautham</span><span>No cookies · No tracking</span></div>
   </div>
 </footer>
 
@@ -595,29 +506,13 @@ footer a:hover { color: #fff; }
 const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const $ = id => document.getElementById(id);
 
-// Nav: glass once scrolled, hides on the way down, returns on the way up; reading progress bar;
-// the hero screenshot straightens as you scroll
-const nav = $("nav"), progress = $("progress"), heroVisual = $("hero-visual");
-let lastY = scrollY, ticking = false;
-function onScroll() {
-  const y = scrollY;
-  nav.classList.toggle("scrolled", y > 10);
-  if (y > 160 && y > lastY + 2) nav.classList.add("hidden");
-  else if (y < lastY - 2 || y <= 160) nav.classList.remove("hidden");
-  lastY = y;
-  const max = document.documentElement.scrollHeight - innerHeight;
-  progress.style.transform = `scaleX(${max > 0 ? y / max : 0})`;
-  heroVisual.style.setProperty("--tilt", Math.max(0, 1 - y / 600).toFixed(3));
-  ticking = false;
-}
-addEventListener("scroll", () => { if (!ticking) { ticking = true; requestAnimationFrame(onScroll); } }, { passive: true });
-onScroll();
-
-// Highlight the nav link of the section in view
+// Nav border once scrolled + highlight the section in view
+const nav = $("nav");
+addEventListener("scroll", () => nav.classList.toggle("scrolled", scrollY > 4), { passive: true });
 const navLinks = new Map([...document.querySelectorAll("#links a")].map(a => [a.getAttribute("href").slice(1), a]));
 const navObserver = new IntersectionObserver(entries => entries.forEach(e => {
   if (e.isIntersecting) navLinks.forEach((a, id) => a.classList.toggle("active", id === e.target.id));
-}), { rootMargin: "-45% 0px -50% 0px" });
+}), { rootMargin: "-40% 0px -55% 0px" });
 navLinks.forEach((a, id) => { const s = $(id); if (s) navObserver.observe(s); });
 
 // Reveal on scroll + count-up stats
@@ -626,20 +521,20 @@ const revealObserver = new IntersectionObserver(entries => entries.forEach(e => 
   e.target.classList.add("in");
   e.target.querySelectorAll("[data-count]").forEach(countUp);
   revealObserver.unobserve(e.target);
-}), { threshold: 0.15 });
+}), { threshold: 0.12 });
 document.querySelectorAll(".reveal").forEach(el => revealObserver.observe(el));
 function countUp(el) {
   const target = +el.dataset.count;
-  if (reduce || target === 0) { el.textContent = target.toLocaleString(); return; }
-  const start = performance.now(), dur = 1700;
+  if (reduce || !target) { el.textContent = target.toLocaleString(); return; }
+  const start = performance.now();
   (function step(now) {
-    const t = Math.min(1, (now - start) / dur), eased = 1 - Math.pow(1 - t, 4);
-    el.textContent = Math.round(target * eased).toLocaleString();
+    const t = Math.min(1, (now - start) / 1400);
+    el.textContent = Math.round(target * (1 - Math.pow(1 - t, 4))).toLocaleString();
     if (t < 1) requestAnimationFrame(step);
   })(start);
 }
 
-// Rotating headline word; the box resizes to each word so nothing jumps
+// Rotating headline word; the box resizes so the line stays centered
 const rotator = $("rotator"), words = [...rotator.children];
 let wi = 0;
 const fitWord = el => { rotator.style.width = el.getBoundingClientRect().width + "px"; };
@@ -648,25 +543,45 @@ addEventListener("resize", () => fitWord(words[wi]));
 if (document.fonts) document.fonts.ready.then(() => fitWord(words[wi]));
 if (!reduce) setInterval(() => {
   const cur = words[wi], next = words[(wi + 1) % words.length];
-  cur.classList.add("out");
-  next.classList.remove("next");
-  fitWord(next);
-  setTimeout(() => { cur.classList.remove("out"); cur.classList.add("next"); }, 700);
+  cur.classList.add("out"); next.classList.remove("next"); fitWord(next);
+  setTimeout(() => { cur.classList.remove("out"); cur.classList.add("next"); }, 600);
   wi = (wi + 1) % words.length;
 }, 2600);
 
-// Scroll story: the pinned screenshot follows the step in the middle of the screen
-const storySteps = [...document.querySelectorAll(".story-step")];
-const storyShots = [...$("story-stack").querySelectorAll("img")];
-const storyDots = [...$("story-dots").children];
-const storyObserver = new IntersectionObserver(entries => entries.forEach(e => {
-  if (!e.isIntersecting) return;
-  const i = +e.target.dataset.i;
-  storySteps.forEach((s, k) => s.classList.toggle("active", k === i));
-  storyShots.forEach((s, k) => s.classList.toggle("show", k === i));
-  storyDots.forEach((d, k) => d.classList.toggle("on", k === i));
-}), { rootMargin: "-45% 0px -45% 0px" });
-storySteps.forEach(s => storyObserver.observe(s));
+// Copy command
+$("copy").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText($("cmd-text").textContent); $("copy").title = "Copied"; } catch (e) {}
+});
+
+// Tour tabs
+const TOUR = [
+  { img: "dashboard.png", title: "Protection", h: "Calm when all is well.", p: "The shield ring orbits while real-time monitoring keeps watch.",
+    pts: ["Baseline, honeypot and alerts at a glance", "Toggle file and process monitors", "Live CPU sparkline"] },
+  { img: "threat.png", title: "Threat detected", h: "Loud when it matters.", p: "Renames to .locked, a touched honeypot or a burst of changes turn the ring red within seconds.",
+    pts: ["Critical toasts and sound", "Every event explained", "Tray alerts when minimized"] },
+  { img: "antivirus.png", title: "Antivirus", h: "Scans that explain themselves.", p: "Every finding says why it was flagged, with one-click quarantine.",
+    pts: ["Quick, full and custom scans", "Signatures, heuristics, YARA, Defender", "On-access scanning"] },
+  { img: "quarantine.png", title: "Quarantine", h: "Nothing lost by mistake.", p: "Quarantined files are neutralized and can't run until you decide.",
+    pts: ["One-click restore", "Delete always asks first", "Stored in your profile only"] },
+  { img: "stream-dialog.png", title: "Go live", h: "Share safely, on your terms.", p: "Privacy mode hides folders and your user name; every sharing option asks first.",
+    pts: ["This PC, Wi-Fi or internet", "Links expire after 2 hours", "Viewer notifications"], narrow: true },
+];
+function showTour(i) {
+  const t = TOUR[i];
+  [...$("tabs").children].forEach((b, k) => b.classList.toggle("active", k === i));
+  const img = $("tour-img");
+  img.style.animation = "none"; void img.offsetWidth; img.style.animation = "";
+  img.src = t.img; img.alt = t.title; img.classList.toggle("narrow", !!t.narrow);
+  $("tour-title").textContent = "SecureVault — " + t.title;
+  const copy = $("tour-copy");
+  copy.innerHTML = "<h3></h3><p></p><ul></ul>";
+  copy.querySelector("h3").textContent = t.h;
+  copy.querySelector("p").textContent = t.p;
+  t.pts.forEach(s => { const li = document.createElement("li"); li.textContent = s; copy.querySelector("ul").append(li); });
+}
+$("tabs").addEventListener("click", e => { const b = e.target.closest("button"); if (b) showTour(+b.dataset.i); });
+showTour(0);
+addEventListener("load", () => TOUR.slice(1).forEach(t => { const i = new Image(); i.src = t.img; }));  // preload the other tabs
 
 // Ransomware attack simulator (runs only in the browser)
 const FILES = [
@@ -675,12 +590,12 @@ const FILES = [
   { ic: "📝", name: "Notes.txt" },
 ];
 const STEPS = [
-  [600,  () => lock(0), "crit", "File renamed to ransomware extension", "Thesis draft.docx → Thesis draft.docx.locked"],
-  [1300, () => lock(1), "crit", "File renamed to ransomware extension", "Budget 2026.xlsx → Budget 2026.xlsx.locked"],
+  [600,  () => lock(0), "crit", "File renamed to ransomware extension", "Thesis draft.docx → .locked"],
+  [1300, () => lock(1), "crit", "File renamed to ransomware extension", "Budget 2026.xlsx → .locked"],
   [1900, () => lock(3), "crit", "Honeypot modified!", "A process touched the decoy file"],
-  [2400, () => lock(2), "crit", "Mass file changes detected", "6 changes in 10 s: possible ransomware activity"],
-  [3100, () => alertOn(), "info", "Alert raised on your desktop and phone", "Toast, sound and live stream banner"],
-  [4000, null, "ok", "Next: quarantine the program and restore backups", "Notes.txt untouched: caught before it spread"],
+  [2400, () => lock(2), "crit", "Mass file changes detected", "6 changes in 10 s"],
+  [3100, () => alertOn(), "info", "Alert raised on desktop and phone", "Toast, sound and stream banner"],
+  [4000, null, "ok", "Next: quarantine and restore backups", "Notes.txt untouched"],
 ];
 let simTimers = [], simStart = 0, clockRAF;
 function renderFiles() {
@@ -701,7 +616,7 @@ function lock(i) {
   d.classList.add("locked");
   if (!FILES[i].honey) d.querySelector(".nm").textContent = FILES[i].name + ".locked";
   d.querySelector(".ic").textContent = "🔒";
-  d.querySelector(".tag").textContent = FILES[i].honey ? "Touched!" : "Encrypted";
+  d.querySelector(".tag").textContent = FILES[i].honey ? "Touched" : "Encrypted";
 }
 function addEvent(kind, title, sub) {
   const empty = $("timeline").querySelector(".empty-tl");
@@ -716,7 +631,7 @@ function addEvent(kind, title, sub) {
 }
 function alertOn() {
   $("sim-status").classList.add("alert");
-  $("sim-text").textContent = "Threat detected · you were alerted in under 2 seconds";
+  $("sim-text").textContent = "Threat detected · alerted in under 2 seconds";
 }
 function resetSim() {
   simTimers.forEach(clearTimeout); simTimers = [];
@@ -737,7 +652,7 @@ $("sim-play").addEventListener("click", () => {
 });
 renderFiles();
 
-// Show the latest release version and size when GitHub is reachable
+// Latest release version and size
 fetch("https://api.github.com/repos/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System/releases/latest")
   .then(r => r.ok ? r.json() : null)
   .then(rel => {
