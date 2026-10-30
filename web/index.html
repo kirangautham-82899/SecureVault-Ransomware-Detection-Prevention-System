@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>SecureVault Live</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 120'%3E%3Cpath d='M60 6C76 13 92 15 106 16C106 64 88 96 60 114C32 96 14 64 14 16C28 15 44 13 60 6Z' fill='%234c8df6'/%3E%3Cpath d='M39 60L54 75L82 45' fill='none' stroke='%23fff' stroke-width='10' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #eef3fb; --bg-deep: #e2ebf8; --surface: #ffffff; --surface-2: #f5f8fe; --surface-3: #eaf1fc;
+  --border: #e1e9f6; --text: #1d2b4f; --muted: #6b7a9c; --subtle: #a6b3cf;
+  --accent: #4c8df6; --accent-2: #7aa9ff; --accent-deep: #3a78e6; --accent-soft: #e6f0ff;
+  --success: #2fbf8f; --warning: #f2a33a; --critical: #ef5b6e; --info: #4c8df6;
+  --state: var(--warning);
+  --shadow: 0 12px 32px rgba(76, 141, 246, .12), 0 2px 6px rgba(29, 43, 79, .04);
+  --radius: 20px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(900px 500px at 92% -10%, rgba(122, 169, 255, .28), transparent 60%),
+    radial-gradient(700px 500px at -10% 110%, rgba(47, 191, 143, .12), transparent 60%),
+    linear-gradient(160deg, var(--bg), var(--bg-deep));
+  background-attachment: fixed;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1180px; margin: 0 auto; padding: 24px 24px 40px; }
+
+/* Header */
+header { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 12px; margin-right: auto; }
+.brand svg { width: 40px; height: 40px; filter: drop-shadow(0 6px 12px rgba(76, 141, 246, .35)); }
+.brand h1 { margin: 0; font-size: 20px; letter-spacing: -.2px; }
+.brand p { margin: 0; color: var(--muted); font-size: 12.5px; }
+.pill {
+  display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px;
+  font-size: 12px; font-weight: 700; background: var(--surface); border: 1px solid var(--border);
+  box-shadow: var(--shadow); color: var(--muted); white-space: nowrap;
+}
+.live { color: #fff; background: linear-gradient(135deg, #ff7a8a, var(--critical)); border: none; letter-spacing: 1px; }
+.live .dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; animation: blink 1.4s infinite; }
+.live.off { background: var(--surface-3); color: var(--muted); }
+.live.off .dot { background: var(--subtle); animation: none; }
+@keyframes blink { 50% { opacity: .25; } }
+
+/* Layout */
+.grid { display: grid; grid-template-columns: 340px 1fr; gap: 20px; }
+.col { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 20px; animation: rise .7s cubic-bezier(.2, .8, .2, 1) both;
+}
+.card:nth-child(2) { animation-delay: .08s; } .card:nth-child(3) { animation-delay: .16s; }
+@keyframes rise { from { opacity: 0; transform: translateY(16px); } }
+.card h2 { margin: 0; font-size: 15px; }
+.card .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.card-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+.card-head > div:first-child { margin-right: auto; }
+
+/* Hero */
+.hero { text-align: center; padding: 28px 20px 24px; }
+.ring { position: relative; width: 184px; height: 184px; margin: 0 auto 18px; }
+.ring .glow {
+  position: absolute; inset: -6px; border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--state) 22%, transparent) 55%, transparent 72%);
+  animation: breathe 3.2s ease-in-out infinite; transition: background .6s;
+}
+.ring .track { position: absolute; inset: 16px; border-radius: 50%; border: 10px solid var(--surface-3); }
+.ring .comet {
+  position: absolute; inset: 16px; border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0 35%, var(--state) 100%);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 10px), #000 calc(100% - 10px));
+          mask: radial-gradient(farthest-side, transparent calc(100% - 10px), #000 calc(100% - 10px));
+  animation: spin 2.4s linear infinite; transition: opacity .6s;
+}
+.ring .ripple { position: absolute; inset: 30px; border-radius: 50%; border: 2px solid var(--critical); opacity: 0; }
+.threat .ring .ripple { animation: ripple 1.8s ease-out infinite; }
+.threat .ring .ripple:nth-of-type(2) { animation-delay: .6s; }
+.threat .ring .ripple:nth-of-type(3) { animation-delay: 1.2s; }
+.threat .ring .comet { animation-duration: 1.1s; }
+.idle .ring .comet { animation-duration: 14s; opacity: .55; }
+.ring .disc {
+  position: absolute; inset: 34px; border-radius: 50%; display: grid; place-items: center;
+  background: radial-gradient(circle at 50% 25%, #fff, var(--surface-2));
+  border: 1px solid color-mix(in srgb, var(--state) 15%, transparent);
+}
+.ring .disc svg { width: 64px; height: 64px; animation: bob 3.2s ease-in-out infinite; }
+.ring .disc svg path:first-child { fill: var(--state); transition: fill .6s; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes breathe { 50% { transform: scale(1.06); opacity: .7; } }
+@keyframes bob { 50% { transform: translateY(-3px); } }
+@keyframes ripple { from { transform: scale(.9); opacity: .7; } to { transform: scale(1.5); opacity: 0; } }
+.hero h3 { margin: 0; font-size: 22px; }
+.hero p { margin: 6px 0 16px; color: var(--muted); font-size: 13px; }
+.folder {
+  display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 12px;
+  background: var(--surface-2); border: 1px solid var(--border); font-size: 13px; font-weight: 600; max-width: 100%;
+}
+.folder span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.monitors { display: grid; gap: 10px; }
+.monitor { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; background: var(--surface-2); }
+.monitor b { display: block; font-size: 13px; }
+.monitor small { color: var(--muted); font-size: 11.5px; }
+.monitor .state { margin-left: auto; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 999px;
+  background: var(--surface-3); color: var(--muted); transition: all .4s; }
+.monitor .state.on { background: rgba(47, 191, 143, .14); color: var(--success); }
+
+/* Stats */
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.stat { display: flex; gap: 12px; align-items: flex-start; padding: 16px; }
+.stat .bubble { width: 42px; height: 42px; border-radius: 14px; display: grid; place-items: center; font-size: 18px;
+  background: var(--accent-soft); flex: none; transition: background .4s; }
+.stat label { display: block; color: var(--muted); font-size: 12px; font-weight: 600; }
+.stat > div:last-child { min-width: 0; }
+.stat strong { display: block; font-size: 21px; line-height: 1.25; white-space: nowrap; }
+.stat small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat small { color: var(--muted); font-size: 11px; }
+.stat.bump strong { animation: bump .5s; }
+@keyframes bump { 40% { transform: scale(1.15); color: var(--critical); } }
+
+/* Chart */
+canvas { width: 100%; height: 150px; display: block; }
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); font-weight: 600; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+
+/* Feed */
+.chips { display: inline-flex; background: var(--surface-3); border-radius: 12px; padding: 3px; }
+.chips button {
+  border: 0; background: none; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--muted);
+  padding: 6px 13px; border-radius: 9px; cursor: pointer; transition: all .2s;
+}
+.chips button.active { background: var(--surface); color: var(--accent-deep); box-shadow: 0 2px 8px rgba(76, 141, 246, .15); }
+.feed { list-style: none; margin: 0; padding: 0; max-height: 520px; overflow-y: auto; overflow-x: hidden; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.feed li {
+  display: flex; align-items: center; gap: 12px; padding: 11px 12px; border-radius: 14px; transition: background .2s;
+}
+.feed li:hover { background: var(--surface-2); }
+.feed li.new { animation: slide .55s cubic-bezier(.2, .8, .2, 1), flash 1.8s ease-out; }
+@keyframes slide { from { opacity: 0; transform: translateX(24px); } }
+@keyframes flash { from { background: color-mix(in srgb, var(--lvl) 16%, white); } }
+.feed .dot { width: 34px; height: 34px; border-radius: 50%; flex: none; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--lvl) 14%, transparent); }
+.feed .dot::after { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--lvl); }
+.feed li.critical .dot::after { animation: blink 1s 6; }
+.feed .txt { min-width: 0; flex: 1; }
+.feed .msg { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.feed .meta { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.feed .lvl { font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 999px; flex: none;
+  color: var(--lvl); background: color-mix(in srgb, var(--lvl) 12%, transparent); }
+.empty { text-align: center; color: var(--muted); padding: 50px 10px; font-size: 13px; }
+.hidden { display: none !important; }
+
+/* Threat banner */
+.banner {
+  position: fixed; left: 50%; top: 16px; transform: translate(-50%, -140%); z-index: 10;
+  display: flex; align-items: center; gap: 12px; max-width: min(640px, calc(100% - 32px));
+  background: var(--surface); border: 1px solid rgba(239, 91, 110, .35); border-radius: 16px;
+  box-shadow: 0 18px 40px rgba(239, 91, 110, .25); padding: 12px 16px; visibility: hidden; opacity: 0;
+  transition: transform .5s cubic-bezier(.2, .8, .2, 1), opacity .3s, visibility 0s .5s;
+}
+.banner.show { transform: translate(-50%, 0); visibility: visible; opacity: 1; transition: transform .5s cubic-bezier(.2, .8, .2, 1), opacity .3s; }
+.banner .icon { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; flex: none;
+  color: var(--critical); background: rgba(239, 91, 110, .14); font-weight: 800; }
+.banner b { color: var(--critical); display: block; font-size: 13px; }
+.banner span { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.banner button { margin-left: auto; border: 0; background: var(--surface-3); color: var(--muted); border-radius: 50%;
+  width: 28px; height: 28px; cursor: pointer; flex: none; }
+footer { text-align: center; color: var(--subtle); font-size: 12px; margin-top: 26px; }
+
+@media (max-width: 1180px) {
+  .stats { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 980px) {
+  .grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 520px) {
+  .wrap { padding: 16px 16px 32px; }
+  .stats { gap: 12px; }
+  .stat { padding: 14px; }
+  .feed .lvl { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body class="idle">
+<div class="banner" id="banner" role="alert">
+  <div class="icon">!</div>
+  <div><b>Threat detected</b><span id="banner-text"></span></div>
+  <button aria-label="Dismiss" onclick="hideBanner()">✕</button>
+</div>
+
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <svg viewBox="0 0 120 120"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9cc1ff"/><stop offset="1" stop-color="#3a78e6"/></linearGradient></defs>
+        <path d="M60 6C76 13 92 15 106 16C106 64 88 96 60 114C32 96 14 64 14 16C28 15 44 13 60 6Z" fill="url(#g)"/>
+        <path d="M39 60L54 75L82 45" fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div><h1>SecureVault Live</h1><p>Real-time ransomware protection, streamed</p></div>
+    </div>
+    <span class="pill live off" id="live"><span class="dot"></span><span id="live-text">CONNECTING</span></span>
+    <span class="pill" title="People watching this stream">👁 <span id="viewers">0</span> watching</span>
+  </header>
+
+  <div class="grid">
+    <div class="col">
+      <section class="card hero">
+        <div class="ring">
+          <div class="glow"></div><div class="track"></div><div class="comet"></div>
+          <div class="ripple"></div><div class="ripple"></div><div class="ripple"></div>
+          <div class="disc"><svg viewBox="0 0 120 120"><path d="M60 6C76 13 92 15 106 16C106 64 88 96 60 114C32 96 14 64 14 16C28 15 44 13 60 6Z"/>
+            <path id="mark" d="M44 46V74M76 46V74" fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        </div>
+        <h3 id="headline">Connecting…</h3>
+        <p id="subline">Waiting for SecureVault</p>
+        <div class="folder">📁 <span id="folder">-</span></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><div><h2>Live protection</h2><div class="sub">Monitors running on the host</div></div></div>
+        <div class="monitors">
+          <div class="monitor"><div><b>Real-time file monitor</b><small>Watches every change in the folder</small></div><span class="state" id="file-state">Off</span></div>
+          <div class="monitor"><div><b>Process monitor</b><small>Flags sustained high CPU usage</small></div><span class="state" id="cpu-state">Off</span></div>
+        </div>
+      </section>
+    </div>
+
+    <div class="col">
+      <div class="stats">
+        <section class="card stat" id="stat-alerts"><div class="bubble">🔔</div><div><label>Alerts</label><strong id="alerts">0</strong><small id="alerts-sub">Nothing suspicious</small></div></section>
+        <section class="card stat"><div class="bubble">🗂️</div><div><label>Baseline</label><strong id="baseline">-</strong><small id="baseline-sub">&nbsp;</small></div></section>
+        <section class="card stat"><div class="bubble">🧲</div><div><label>Honeypot</label><strong id="honeypot">-</strong><small id="honeypot-sub">&nbsp;</small></div></section>
+        <section class="card stat"><div class="bubble">⚡</div><div><label>CPU</label><strong id="cpu">-</strong><small id="mem">RAM -</small></div></section>
+      </div>
+
+      <section class="card">
+        <div class="card-head">
+          <div><h2>System load</h2><div class="sub">Last 60 seconds</div></div>
+          <div class="legend"><span><i style="background:var(--accent)"></i>CPU</span><span><i style="background:var(--success)"></i>RAM</span></div>
+        </div>
+        <canvas id="chart"></canvas>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <div><h2>Activity</h2><div class="sub">Events as they happen</div></div>
+          <div class="chips" id="chips">
+            <button class="active" data-filter="all">All</button>
+            <button data-filter="alerts">Alerts</button>
+            <button data-filter="info">Info</button>
+          </div>
+        </div>
+        <ul class="feed" id="feed"></ul>
+        <div class="empty" id="empty">No events yet. They will appear here the moment they happen.</div>
+      </section>
+    </div>
+  </div>
+  <footer>Read-only live view · Anyone with this link can watch until streaming is stopped</footer>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const token = new URLSearchParams(location.search).get("token") || "";
+const COLORS = { info: "#4c8df6", success: "#2fbf8f", warning: "#f2a33a", critical: "#ef5b6e" };
+const LABELS = { info: "Info", success: "OK", warning: "Warning", critical: "Critical" };
+const MARKS = { protected: "M39 60L54 75L82 45", threat: "M60 36V62M60 80V80", idle: "M48 46V74M72 46V74" };
+const MAX_ITEMS = 300;
+let filter = "all", metrics = [], unseen = 0, bannerTimer;
+
+function shortMessage(ev) {
+  let msg = ev.message;
+  if (ev.path) {
+    ev.path.split(" -> ").forEach(p => {
+      const cut = Math.max(p.lastIndexOf("\\"), p.lastIndexOf("/"));
+      if (cut > 0) msg = msg.split(p.slice(0, cut + 1)).join("");
+    });
+  }
+  return msg;
+}
+function matches(level) {
+  return filter === "all" || (filter === "alerts" ? ["warning", "critical"].includes(level) : ["info", "success"].includes(level));
+}
+
+function addEvent(ev, live) {
+  const li = document.createElement("li");
+  li.className = ev.level + (live ? " new" : "");
+  li.dataset.level = ev.level;
+  li.style.setProperty("--lvl", COLORS[ev.level] || COLORS.info);
+  li.title = ev.message;
+  const dot = document.createElement("div"); dot.className = "dot";
+  const txt = document.createElement("div"); txt.className = "txt";
+  const msg = document.createElement("div"); msg.className = "msg"; msg.textContent = shortMessage(ev);
+  const meta = document.createElement("div"); meta.className = "meta";
+  const time = new Date(ev.ts * 1000).toLocaleTimeString();
+  meta.textContent = [time, ev.category, ev.path && !ev.path.includes(" -> ") ? ev.path : ""].filter(Boolean).join("  ·  ");
+  const lvl = document.createElement("span"); lvl.className = "lvl"; lvl.textContent = LABELS[ev.level] || ev.level;
+  txt.append(msg, meta); li.append(dot, txt, lvl);
+  if (!matches(ev.level)) li.classList.add("hidden");
+  const feed = $("feed");
+  feed.prepend(li);
+  while (feed.children.length > MAX_ITEMS) feed.lastChild.remove();
+  updateEmpty();
+  if (live && ev.level === "critical") showBanner(shortMessage(ev));
+}
+
+function updateEmpty() {
+  $("empty").classList.toggle("hidden", !![...$("feed").children].some(li => !li.classList.contains("hidden")));
+}
+
+function applyState(s) {
+  if (!s || !Object.keys(s).length) return;
+  const status = s.status || "idle";
+  document.body.className = status;
+  document.documentElement.style.setProperty("--state",
+    status === "protected" ? "var(--accent)" : status === "threat" ? "var(--critical)" : "var(--warning)");
+  $("mark").setAttribute("d", MARKS[status] || MARKS.idle);
+  $("headline").textContent = s.headline || "";
+  $("subline").textContent = s.subline || "";
+  $("folder").textContent = s.folder || "-";
+  for (const [id, on] of [["file-state", s.file_monitor], ["cpu-state", s.cpu_monitor]]) {
+    $(id).textContent = on ? "Running" : "Off";
+    $(id).classList.toggle("on", !!on);
+  }
+  const prev = Number($("alerts").textContent);
+  $("alerts").textContent = s.alerts ?? 0;
+  $("alerts-sub").textContent = s.alerts ? `${s.critical} critical · ${s.warnings} warnings` : "Nothing suspicious";
+  if ((s.alerts ?? 0) > prev) { const el = $("stat-alerts"); el.classList.remove("bump"); void el.offsetWidth; el.classList.add("bump"); }
+  $("baseline").textContent = s.baseline || "-";
+  $("baseline-sub").textContent = s.baseline_sub || " ";
+  $("honeypot").textContent = s.honeypot || "-";
+  $("honeypot-sub").textContent = s.honeypot_sub || " ";
+}
+
+function addMetric(m) {
+  metrics.push(m);
+  if (metrics.length > 60) metrics.shift();
+  $("cpu").textContent = `${Math.round(m.cpu)}%`;
+  $("mem").textContent = `RAM ${Math.round(m.mem)}%`;
+  drawChart();
+}
+
+function drawChart() {
+  const canvas = $("chart"), dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (canvas.width !== w * dpr) { canvas.width = w * dpr; canvas.height = h * dpr; }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  const pad = { l: 34, r: 6, t: 8, b: 8 }, cw = w - pad.l - pad.r, ch = h - pad.t - pad.b;
+  ctx.font = "11px Segoe UI, system-ui, sans-serif";
+  ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  for (const p of [0, 50, 100]) {
+    const y = pad.t + ch - p / 100 * ch;
+    ctx.strokeStyle = "#e1e9f6"; ctx.setLineDash(p ? [4, 4] : []); ctx.beginPath();
+    ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
+    ctx.fillStyle = "#a6b3cf"; ctx.fillText(p + "%", pad.l - 8, y);
+  }
+  ctx.setLineDash([]);
+  const series = (key, color) => {
+    if (metrics.length < 2) return;
+    const step = cw / 59, offset = 60 - metrics.length;
+    const pts = metrics.map((m, i) => [pad.l + (i + offset) * step, pad.t + ch - m[key] / 100 * ch]);
+    ctx.beginPath(); ctx.moveTo(...pts[0]);
+    for (let i = 1; i < pts.length; i++) {
+      const mx = (pts[i - 1][0] + pts[i][0]) / 2;
+      ctx.bezierCurveTo(mx, pts[i - 1][1], mx, pts[i][1], ...pts[i]);
+    }
+    ctx.strokeStyle = color; ctx.lineWidth = 2.2; ctx.stroke();
+    ctx.lineTo(pts[pts.length - 1][0], pad.t + ch); ctx.lineTo(pts[0][0], pad.t + ch); ctx.closePath();
+    const g = ctx.createLinearGradient(0, pad.t, 0, pad.t + ch);
+    g.addColorStop(0, color + "40"); g.addColorStop(1, color + "00");
+    ctx.fillStyle = g; ctx.fill();
+    const last = pts[pts.length - 1];
+    ctx.beginPath(); ctx.arc(last[0], last[1], 3.5, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
+  };
+  series("mem", "#2fbf8f");
+  series("cpu", "#4c8df6");
+}
+
+function showBanner(text) {
+  $("banner-text").textContent = text;
+  $("banner").classList.add("show");
+  clearTimeout(bannerTimer);
+  bannerTimer = setTimeout(hideBanner, 9000);
+  if (document.hidden) { unseen++; document.title = `(${unseen}) Threat detected · SecureVault Live`; }
+}
+function hideBanner() { $("banner").classList.remove("show"); }
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) { unseen = 0; document.title = "SecureVault Live"; }
+});
+
+function setLive(state) {
+  const el = $("live");
+  el.classList.toggle("off", state !== "live");
+  $("live-text").textContent = { live: "LIVE", reconnecting: "RECONNECTING", ended: "STREAM ENDED" }[state];
+}
+
+$("chips").addEventListener("click", e => {
+  const btn = e.target.closest("button");
+  if (!btn) return;
+  filter = btn.dataset.filter;
+  [...$("chips").children].forEach(b => b.classList.toggle("active", b === btn));
+  [...$("feed").children].forEach(li => li.classList.toggle("hidden", !matches(li.dataset.level)));
+  updateEmpty();
+});
+window.addEventListener("resize", drawChart);
+
+function connect() {
+  const es = new EventSource("/stream?token=" + encodeURIComponent(token));
+  es.addEventListener("snapshot", e => {
+    const d = JSON.parse(e.data);
+    $("feed").replaceChildren();
+    d.events.forEach(ev => addEvent(ev, false));
+    metrics = [];
+    d.metrics.forEach(addMetric);
+    applyState(d.state);
+    $("viewers").textContent = d.viewers + 1;
+    updateEmpty();
+    setLive("live");
+  });
+  es.addEventListener("event", e => addEvent(JSON.parse(e.data), true));
+  es.addEventListener("state", e => applyState(JSON.parse(e.data)));
+  es.addEventListener("metrics", e => addMetric(JSON.parse(e.data)));
+  es.addEventListener("viewers", e => { $("viewers").textContent = JSON.parse(e.data).count; });
+  es.onerror = () => {
+    if (es.readyState === EventSource.CLOSED) {
+      setLive("ended");
+      $("headline").textContent = "Stream ended";
+      $("subline").textContent = "The host stopped streaming or the link has expired.";
+    } else {
+      setLive("reconnecting");
+    }
+  };
+}
+drawChart();
+connect();
+</script>
+</body>
+</html>

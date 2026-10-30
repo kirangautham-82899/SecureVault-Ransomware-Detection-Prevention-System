@@ -8,32 +8,36 @@ import datetime
 import threading
 import itertools
 
-from PyQt6.QtCore import Qt, QObject, QTimer, QUrl, pyqtSignal
-from PyQt6.QtGui import QAction, QDesktopServices, QFontMetrics, QColor, QFont
+from PyQt6.QtCore import (
+    Qt, QObject, QTimer, QUrl, QPoint, QPropertyAnimation, QParallelAnimationGroup,
+    QSequentialAnimationGroup, QEasingCurve, pyqtSignal,
+)
+from PyQt6.QtGui import (
+    QAction, QDesktopServices, QColor, QPainter, QLinearGradient, QRadialGradient,
+    QPalette, QGuiApplication,
+)
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout,
-    QHBoxLayout, QGridLayout, QLineEdit, QComboBox, QTableWidget,
-    QTableWidgetItem, QHeaderView, QAbstractItemView, QFileDialog, QDialog,
-    QPlainTextEdit, QSystemTrayIcon, QMenu, QStatusBar, QSizePolicy,
+    QHBoxLayout, QGridLayout, QLineEdit, QFileDialog, QDialog, QPlainTextEdit,
+    QSystemTrayIcon, QMenu, QGraphicsOpacityEffect, QButtonGroup, QFrame,
 )
 
 # Allow running this file directly as well as via main.py
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from main import (  # noqa: E402
-    APP_NAME, APP_VERSION, APP_DIR, LOG_FILE, HASH_DB_FILE,
+    APP_NAME, APP_VERSION, APP_DIR, LOG_FILE,
     create_baseline, check_for_changes, create_honeypot, honeypot_path,
     start_real_time_monitor, monitor_processes_sustained, load_baseline,
     normalize_path, emit, INFO, SUCCESS, WARNING, CRITICAL,
 )
+from stream import LiveStreamServer  # noqa: E402
 from gui import theme  # noqa: E402
 from gui.widgets import (  # noqa: E402
-    Card, StatCard, ToggleSwitch, StatusPill, SystemLoadGraph, ToastManager,
-    ShieldLogo, SoundManager, make_app_icon,
+    Card, StatChip, ToggleSwitch, StatusPill, StatusRing, Sparkline, ActionTile,
+    ActivityFeed, ToastManager, ShieldLogo, SoundManager, make_app_icon, add_shadow,
 )
 from gui.splash import SplashScreen  # noqa: E402
-
-MAX_FEED_ROWS = 2000
 
 
 class Bridge(QObject):
@@ -43,85 +47,47 @@ class Bridge(QObject):
     task_failed = pyqtSignal(str, int, str)
 
 
-class ElidedLabel(QLabel):
-    """A label that shortens long text with an ellipsis in the middle."""
-    def __init__(self, text="", parent=None):
-        super().__init__(parent)
-        self._full = text
-        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        self.setText(text)
-
-    def setText(self, text):
-        self._full = text
-        self.setToolTip(text)
-        self._refresh()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._refresh()
-
-    def _refresh(self):
-        elided = QFontMetrics(self.font()).elidedText(self._full, Qt.TextElideMode.ElideMiddle, max(40, self.width()))
-        super().setText(elided)
-
-
-class ActionTile(QPushButton):
-    """Large button with an icon badge, title and description."""
-    def __init__(self, glyph, title, description, primary=False, parent=None):
-        super().__init__(parent)
-        self.setProperty("variant", "primary" if primary else "action")
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setMinimumHeight(62)
-        self._title_text = title
-        self._desc_text = description
-        self._primary = primary
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 10, 14, 10)
-        layout.setSpacing(12)
-        self.glyph = QLabel(glyph)
-        self.glyph.setFixedSize(34, 34)
-        self.glyph.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        badge_bg = "rgba(4, 19, 31, 0.18)" if primary else theme.SURFACE_3
-        self.glyph.setStyleSheet(f"background: {badge_bg}; border-radius: 8px; font-size: 16px;")
-        text = QVBoxLayout()
-        text.setSpacing(1)
-        fg = "#04131f" if primary else theme.TEXT
-        sub = "rgba(4, 19, 31, 0.7)" if primary else theme.MUTED
-        self.title = QLabel(title)
-        self.title.setStyleSheet(f"color: {fg}; font-weight: 700; font-size: 13px;")
-        self.desc = QLabel(description)
-        self.desc.setStyleSheet(f"color: {sub}; font-size: 11px; font-weight: 400;")
-        text.addWidget(self.title)
-        text.addWidget(self.desc)
-        layout.addWidget(self.glyph)
-        layout.addLayout(text, 1)
-        for w in (self.glyph, self.title, self.desc):
-            w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-
-    def set_busy(self, busy, text="Working..."):
-        self.setEnabled(not busy)
-        self.setCursor(Qt.CursorShape.BusyCursor if busy else Qt.CursorShape.PointingHandCursor)
-        self.title.setText(text if busy else self._title_text)
+class Backdrop(QWidget):
+    """Soft blue gradient background with two blurred colour blobs."""
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        w, h = self.width(), self.height()
+        base = QLinearGradient(0, 0, w * 0.4, h)
+        base.setColorAt(0, QColor(theme.BG))
+        base.setColorAt(1, QColor(theme.BG_DEEP))
+        painter.fillRect(self.rect(), base)
+        for cx, cy, radius, color, alpha in ((w * 0.92, -h * 0.1, w * 0.45, theme.ACCENT_2, 70),
+                                             (-w * 0.05, h * 1.05, w * 0.40, theme.SUCCESS, 30)):
+            blob = QRadialGradient(cx, cy, radius)
+            c = QColor(color)
+            c.setAlpha(alpha)
+            blob.setColorAt(0, c)
+            c.setAlpha(0)
+            blob.setColorAt(1, c)
+            painter.fillRect(self.rect(), blob)
 
 
 class ToggleRow(QWidget):
-    def __init__(self, title, description, parent=None):
+    def __init__(self, glyph, title, parent=None):
         super().__init__(parent)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 4, 0, 4)
+        layout.setContentsMargins(0, 2, 0, 2)
         layout.setSpacing(12)
+        icon = QLabel(glyph)
+        icon.setFixedSize(38, 38)
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon.setStyleSheet(f"background: {theme.ACCENT_SOFT}; border-radius: 12px; font-size: 16px;")
         text = QVBoxLayout()
-        text.setSpacing(2)
+        text.setSpacing(1)
         t = QLabel(title)
         t.setStyleSheet("font-weight: 600;")
-        self.state = QLabel(description)
+        self.state = QLabel("Off")
         self.state.setObjectName("Muted")
         self.state.setStyleSheet("font-size: 11px;")
-        self.state.setWordWrap(True)
         text.addWidget(t)
         text.addWidget(self.state)
         self.switch = ToggleSwitch()
+        layout.addWidget(icon)
         layout.addLayout(text, 1)
         layout.addWidget(self.switch, 0, Qt.AlignmentFlag.AlignVCenter)
 
@@ -132,51 +98,50 @@ class LogViewerWindow(QDialog):
     def __init__(self, log_path, parent=None):
         super().__init__(parent)
         self.setWindowTitle(f"{APP_NAME} - Activity Log")
-        self.resize(820, 560)
+        self.resize(840, 580)
         self.log_path = log_path
         self.full_log = ""
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(12)
+        layout.setContentsMargins(22, 20, 22, 20)
+        layout.setSpacing(14)
 
         header = QHBoxLayout()
+        titles = QVBoxLayout()
+        titles.setSpacing(1)
         title = QLabel("Activity log")
-        title.setObjectName("CardTitle")
-        path = ElidedLabel(log_path)
-        path.setObjectName("Muted")
-        header.addWidget(title)
-        header.addSpacing(10)
-        header.addWidget(path, 1)
-        layout.addLayout(header)
-
+        title.setObjectName("Headline")
+        self.summary = QLabel()
+        self.summary.setObjectName("Muted")
+        titles.addWidget(title)
+        titles.addWidget(self.summary)
+        header.addLayout(titles, 1)
         self.search_bar = QLineEdit()
-        self.search_bar.setPlaceholderText("Filter lines...")
+        self.search_bar.setPlaceholderText("🔍  Filter lines")
         self.search_bar.setClearButtonEnabled(True)
+        self.search_bar.setFixedWidth(240)
         self.search_bar.textChanged.connect(self.search_logs)
-        layout.addWidget(self.search_bar)
+        header.addWidget(self.search_bar)
+        layout.addLayout(header)
 
         self.log_text = QPlainTextEdit()
         self.log_text.setReadOnly(True)
-        self.log_text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self.log_text.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         layout.addWidget(self.log_text, 1)
 
         buttons = QHBoxLayout()
-        self.summary = QLabel()
-        self.summary.setObjectName("Muted")
+        buttons.addStretch()
         refresh = QPushButton("Refresh")
         refresh.clicked.connect(self.load_logs)
         folder = QPushButton("Open folder")
         folder.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.dirname(log_path))))
-        save = QPushButton("Save copy...")
+        save = QPushButton("Save a copy")
         save.setProperty("variant", "primary")
         save.clicked.connect(self.save_logs)
-        buttons.addWidget(self.summary, 1)
-        buttons.addWidget(refresh)
-        buttons.addWidget(folder)
-        buttons.addWidget(save)
+        for b in (refresh, folder, save):
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            buttons.addWidget(b)
         layout.addLayout(buttons)
-
         self.load_logs()
 
     def load_logs(self):
@@ -188,9 +153,9 @@ class LogViewerWindow(QDialog):
         total = len(lines)
         self.full_log = "\n".join(lines[-self.MAX_LINES:])
         if total > self.MAX_LINES:
-            self.summary.setText(f"Showing last {self.MAX_LINES:,} of {total:,} entries")
+            self.summary.setText(f"Showing the last {self.MAX_LINES:,} of {total:,} entries")
         else:
-            self.summary.setText(f"{total:,} entries" if total else "No activity logged yet")
+            self.summary.setText(f"{total:,} entries recorded" if total else "Nothing logged yet")
         self.search_logs(self.search_bar.text())
 
     def search_logs(self, text):
@@ -208,27 +173,149 @@ class LogViewerWindow(QDialog):
                 f.write(self.full_log)
 
 
+class StreamDialog(QDialog):
+    """Start/stop the live web stream and share its link."""
+    def __init__(self, window):
+        super().__init__(window)
+        self.window_ = window
+        self.stream = window.stream
+        self.setWindowTitle(f"{APP_NAME} Live")
+        self.setFixedWidth(500)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(26, 24, 26, 24)
+        layout.setSpacing(16)
+
+        top = QHBoxLayout()
+        top.setSpacing(14)
+        badge = QLabel("📡")
+        badge.setFixedSize(52, 52)
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge.setStyleSheet(f"background: {theme.ACCENT_SOFT}; border-radius: 16px; font-size: 24px;")
+        titles = QVBoxLayout()
+        titles.setSpacing(2)
+        title = QLabel("Live stream")
+        title.setObjectName("Headline")
+        sub = QLabel("Watch SecureVault in real time from any browser: status, alerts and system load.")
+        sub.setObjectName("Muted")
+        sub.setWordWrap(True)
+        titles.addWidget(title)
+        titles.addWidget(sub)
+        top.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
+        top.addLayout(titles, 1)
+        layout.addLayout(top)
+
+        lan_card = QFrame()
+        lan_card.setObjectName("Card")
+        lan_layout = QHBoxLayout(lan_card)
+        lan_layout.setContentsMargins(16, 12, 16, 12)
+        lan_text = QVBoxLayout()
+        lan_text.setSpacing(1)
+        lan_title = QLabel("Allow devices on my network")
+        lan_title.setStyleSheet("font-weight: 600;")
+        lan_sub = QLabel("Watch from your phone or another PC on the same Wi-Fi")
+        lan_sub.setObjectName("Muted")
+        lan_sub.setStyleSheet("font-size: 11px;")
+        lan_text.addWidget(lan_title)
+        lan_text.addWidget(lan_sub)
+        self.lan_switch = ToggleSwitch()
+        self.lan_switch.set_checked_silently(self.stream.lan)
+        self.lan_switch.toggled.connect(self._lan_changed)
+        lan_layout.addLayout(lan_text, 1)
+        lan_layout.addWidget(self.lan_switch)
+        layout.addWidget(lan_card)
+
+        self.url = QLineEdit()
+        self.url.setReadOnly(True)
+        self.url.setPlaceholderText("Start streaming to get a private link")
+        url_row = QHBoxLayout()
+        url_row.setSpacing(8)
+        self.copy_btn = QPushButton("Copy")
+        self.copy_btn.clicked.connect(self._copy)
+        self.open_btn = QPushButton("Open")
+        self.open_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self.stream.url)))
+        url_row.addWidget(self.url, 1)
+        url_row.addWidget(self.copy_btn)
+        url_row.addWidget(self.open_btn)
+        layout.addLayout(url_row)
+
+        self.info = QLabel()
+        self.info.setObjectName("Muted")
+        self.info.setWordWrap(True)
+        self.info.setStyleSheet("font-size: 12px;")
+        layout.addWidget(self.info)
+
+        self.toggle_btn = QPushButton()
+        self.toggle_btn.setMinimumHeight(44)
+        self.toggle_btn.clicked.connect(self._toggle)
+        layout.addWidget(self.toggle_btn)
+        for b in (self.copy_btn, self.open_btn, self.toggle_btn):
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self.refresh)
+        self._timer.start(1000)
+        self.refresh()
+
+    def _toggle(self):
+        if self.stream.running:
+            self.window_.stop_stream()
+        else:
+            self.window_.start_stream(self.lan_switch.isChecked())
+        self.refresh()
+
+    def _lan_changed(self, checked):
+        if self.stream.running:  # The bind address changes, so restart with a new link
+            self.window_.start_stream(checked)
+        self.refresh()
+
+    def _copy(self):
+        QGuiApplication.clipboard().setText(self.stream.url or "")
+        self.copy_btn.setText("Copied ✓")
+        QTimer.singleShot(1500, lambda: self.copy_btn.setText("Copy"))
+
+    def refresh(self):
+        running = self.stream.running
+        if self.url.text() != (self.stream.url or ""):
+            self.url.setText(self.stream.url or "")
+            self.url.setCursorPosition(0)
+        self.copy_btn.setEnabled(running)
+        self.open_btn.setEnabled(running)
+        self.toggle_btn.setText("Stop streaming" if running else "Start streaming")
+        self.toggle_btn.setProperty("variant", "" if running else "primary")
+        self.toggle_btn.style().unpolish(self.toggle_btn)
+        self.toggle_btn.style().polish(self.toggle_btn)
+        if running:
+            n = self.stream.viewers
+            where = "devices on your network" if self.stream.lan else "this computer only"
+            self.info.setText(f"🔴  Live · {n} watching · visible to {where}.\n"
+                              "Anyone with the link can watch. Stopping the stream revokes it.")
+        else:
+            self.info.setText("The viewer is read-only. Each time you start streaming, a new private link is created.")
+
+
 class SecureVaultGUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} - Ransomware Detection & Prevention")
         self.setWindowIcon(make_app_icon())
-        self.resize(1320, 840)
-        self.setMinimumSize(1080, 700)
+        self.resize(1320, 850)
+        self.setMinimumSize(1100, 720)
 
         self.folder_to_monitor = normalize_path(os.path.expanduser("~"))
         self.events = []
         self.counts = {INFO: 0, SUCCESS: 0, WARNING: 0, CRITICAL: 0}
         self.threat_active = False
         self.baseline_meta = None
-        self.last_scan = None
         self._last_toast = 0.0
         self._last_beep = 0.0
         self._tray_hint_shown = False
         self._quitting = False
+        self._entered = False
         self._tokens = itertools.count(1)
         self._running = {}       # task key -> token of the run currently owning it
         self._stop_events = {}   # task key -> threading.Event for long-running monitors
+        self.stream = LiveStreamServer()
 
         self.bridge = Bridge()
         self.bridge.event.connect(self.on_event)
@@ -239,62 +326,51 @@ class SecureVaultGUI(QMainWindow):
         self.setup_tray_icon()
         self.toasts = ToastManager(self.centralWidget())
 
-        self.refresh_protection()
-        self.refresh_honeypot()
-        self.refresh_threats()
+        self._stream_timer = QTimer(self)
+        self._stream_timer.timeout.connect(self.refresh_stream_pill)
+        self._stream_timer.start(2000)
+
+        self.refresh_all()
         self.reload_baseline_meta()
-        self.add_event_row(emit(self._silent, INFO, f"{APP_NAME} v{APP_VERSION} ready", log=False))
+        self.feed.add(emit(self._silent, INFO, f"{APP_NAME} v{APP_VERSION} is ready", log=False))
 
     # ------------------------------------------------------------------ UI
 
     def init_ui(self):
-        root = QWidget()
-        root.setObjectName("Root")
+        root = Backdrop()
         page = QVBoxLayout(root)
-        page.setContentsMargins(24, 20, 24, 16)
-        page.setSpacing(16)
-
+        page.setContentsMargins(28, 22, 28, 24)
+        page.setSpacing(20)
         page.addLayout(self.build_header())
-        page.addWidget(self.build_scope_card())
-        page.addLayout(self.build_stats())
 
         body = QHBoxLayout()
-        body.setSpacing(16)
+        body.setSpacing(20)
         left = QVBoxLayout()
-        left.setSpacing(16)
-        left.addWidget(self.build_protection_card())
-        left.addWidget(self.build_actions_card())
+        left.setSpacing(20)
+        left.addWidget(self.build_hero())
+        left.addWidget(self.build_protection())
         left.addStretch()
         left_widget = QWidget()
         left_widget.setLayout(left)
-        left_widget.setFixedWidth(380)
+        left_widget.setFixedWidth(360)
         left.setContentsMargins(0, 0, 0, 0)
 
         right = QVBoxLayout()
-        right.setSpacing(16)
+        right.setSpacing(20)
         right.setContentsMargins(0, 0, 0, 0)
-        right.addWidget(self.build_load_card())
-        right.addWidget(self.build_activity_card(), 1)
+        right.addLayout(self.build_stats())
+        right.addLayout(self.build_actions())
+        right.addWidget(self.build_activity(), 1)
 
         body.addWidget(left_widget)
         body.addLayout(right, 1)
         page.addLayout(body, 1)
         self.setCentralWidget(root)
 
-        status = QStatusBar()
-        status.setSizeGripEnabled(False)
-        self.status_text = QLabel("Ready")
-        self.scan_text = QLabel("No scan run this session")
-        version = QLabel(f"{APP_NAME} v{APP_VERSION}")
-        status.addWidget(self.status_text, 1)
-        status.addPermanentWidget(self.scan_text)
-        status.addPermanentWidget(version)
-        self.setStatusBar(status)
-
     def build_header(self):
         header = QHBoxLayout()
         header.setSpacing(12)
-        self.logo = ShieldLogo(42)
+        logo = ShieldLogo(40)
         titles = QVBoxLayout()
         titles.setSpacing(0)
         title = QLabel(APP_NAME)
@@ -303,12 +379,18 @@ class SecureVaultGUI(QMainWindow):
         subtitle.setObjectName("BrandSubtitle")
         titles.addWidget(title)
         titles.addWidget(subtitle)
-        header.addWidget(self.logo)
+        header.addWidget(logo)
         header.addLayout(titles)
         header.addStretch()
 
+        self.live_pill = StatusPill()
+        self.live_pill.clicked.connect(self.open_stream_dialog)
+        header.addWidget(self.live_pill)
+
         self.sound_btn = QPushButton()
         self.sound_btn.setProperty("variant", "ghost")
+        self.sound_btn.setFixedSize(38, 38)
+        self.sound_btn.setStyleSheet("padding: 0; border-radius: 19px; font-size: 16px;")
         self.sound_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.sound_btn.clicked.connect(self.toggle_sound)
         self._update_sound_btn()
@@ -319,133 +401,131 @@ class SecureVaultGUI(QMainWindow):
         header.addWidget(self.status_pill)
         return header
 
-    def build_scope_card(self):
-        card = Card()
-        card.body.setContentsMargins(18, 12, 12, 12)
-        row = QHBoxLayout()
-        row.setSpacing(12)
-        icon = QLabel("📁")
-        icon.setStyleSheet("font-size: 20px;")
-        text = QVBoxLayout()
-        text.setSpacing(0)
-        label = QLabel("PROTECTED FOLDER")
-        label.setObjectName("StatLabel")
-        self.scope_label = ElidedLabel(self.folder_to_monitor)
-        self.scope_label.setStyleSheet("font-size: 14px; font-weight: 600;")
-        text.addWidget(label)
-        text.addWidget(self.scope_label)
-        open_btn = QPushButton("Open")
-        open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        open_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(self.folder_to_monitor)))
-        change_btn = QPushButton("Change folder...")
-        change_btn.setProperty("variant", "primary")
-        change_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        change_btn.clicked.connect(self.change_folder)
-        row.addWidget(icon)
-        row.addLayout(text, 1)
-        row.addWidget(open_btn)
-        row.addWidget(change_btn)
-        card.body.addLayout(row)
+    def build_hero(self):
+        card = Card(padding=(22, 26, 22, 22))
+        card.body.setSpacing(6)
+        self.ring = StatusRing()
+        self.ring.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.ring.mousePressEvent = lambda e: self.acknowledge_threat()
+        card.body.addWidget(self.ring, 0, Qt.AlignmentFlag.AlignHCenter)
+        card.body.addSpacing(8)
+        self.headline = QLabel()
+        self.headline.setObjectName("Headline")
+        self.headline.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.subline = QLabel()
+        self.subline.setObjectName("Muted")
+        self.subline.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.subline.setWordWrap(True)
+        card.body.addWidget(self.headline)
+        card.body.addWidget(self.subline)
+        card.body.addSpacing(10)
+
+        self.folder_btn = QPushButton()
+        self.folder_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.folder_btn.setStyleSheet(f"""
+            QPushButton {{ background: {theme.SURFACE_2}; border: 1px solid {theme.BORDER};
+                           border-radius: 12px; padding: 9px 14px; font-weight: 600; }}
+            QPushButton:hover {{ border-color: {theme.ACCENT_2}; background: {theme.ACCENT_SOFT}; }}
+            QPushButton::menu-indicator {{ width: 0; }}
+        """)
+        menu = QMenu(self)
+        menu.addAction("Change protected folder…", self.change_folder)
+        menu.addAction("Open in file explorer", lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(self.folder_to_monitor)))
+        self.folder_btn.setMenu(menu)
+        card.body.addWidget(self.folder_btn, 0, Qt.AlignmentFlag.AlignHCenter)
+        self._update_folder_btn()
+        self.hero = card
         return card
 
-    def build_stats(self):
-        grid = QHBoxLayout()
-        grid.setSpacing(16)
-        self.stat_protection = StatCard("Protection", "Off", "Real-time monitor is off", theme.MUTED)
-        self.stat_baseline = StatCard("Baseline", "Loading...", "")
-        self.stat_honeypot = StatCard("Honeypot", "-", "")
-        self.stat_threats = StatCard("Alerts this session", "0", "")
-        for card in (self.stat_protection, self.stat_baseline, self.stat_honeypot, self.stat_threats):
-            grid.addWidget(card)
-        return grid
-
-    def build_protection_card(self):
-        card = Card("Live protection", "Watch the folder and running processes")
-        self.file_row = ToggleRow("Real-time file monitor", "Off")
-        self.cpu_row = ToggleRow("Process monitor", "Off")
+    def build_protection(self):
+        card = Card("Live protection", "Choose what SecureVault watches")
+        self.file_row = ToggleRow("👁", "Real-time file monitor")
+        self.cpu_row = ToggleRow("⚙", "Process monitor")
         self.file_row.switch.toggled.connect(self.set_file_monitor)
         self.cpu_row.switch.toggled.connect(self.set_cpu_monitor)
         card.body.addWidget(self.file_row)
-        divider = QWidget()
-        divider.setFixedHeight(1)
-        divider.setStyleSheet(f"background: {theme.BORDER};")
-        card.body.addWidget(divider)
         card.body.addWidget(self.cpu_row)
+        self.protection_card = card
         return card
 
-    def build_actions_card(self):
-        card = Card("Actions")
-        grid = QVBoxLayout()
-        grid.setSpacing(8)
+    def build_stats(self):
+        row = QHBoxLayout()
+        row.setSpacing(16)
+        self.stat_baseline = StatChip("🗂", "Baseline")
+        self.stat_honeypot = StatChip("🧲", "Honeypot")
+        self.stat_alerts = StatChip("🔔", "Alerts")
+        self.stat_cpu = StatChip("⚡", "CPU")
+        self.sparkline = Sparkline()
+        self.sparkline.setFixedWidth(84)
+        self.stat_cpu.extra.addWidget(self.sparkline, 0, Qt.AlignmentFlag.AlignBottom)
+        self.stat_cpu.set("0%", "RAM -")
+        self.stats = (self.stat_baseline, self.stat_honeypot, self.stat_alerts, self.stat_cpu)
+        for chip in self.stats:
+            row.addWidget(chip)
+        self._cpu_timer = QTimer(self)
+        self._cpu_timer.timeout.connect(self.sample_load)
+        self._cpu_timer.start(1000)
+        return row
+
+    def build_actions(self):
+        row = QHBoxLayout()
+        row.setSpacing(14)
         self.buttons = {
-            "baseline": ActionTile("🛡", "Create baseline", "Hash every file to record a known-good state", primary=True),
-            "scan": ActionTile("🔍", "Run integrity scan", "Compare files against the baseline"),
-            "honeypot": ActionTile("🧲", "Deploy honeypot", "Place a decoy file that triggers alerts"),
-            "logs": ActionTile("📄", "View activity log", "Browse everything SecureVault recorded"),
+            "baseline": ActionTile("🛡", "Create baseline", "Record a known-good state", primary=True),
+            "scan": ActionTile("🔍", "Integrity scan", "Compare files to the baseline"),
+            "honeypot": ActionTile("🧲", "Deploy honeypot", "Plant a decoy file"),
+            "logs": ActionTile("📄", "Activity log", "Everything ever recorded"),
         }
         self.buttons["baseline"].clicked.connect(self.create_baseline)
         self.buttons["scan"].clicked.connect(self.check_changes)
         self.buttons["honeypot"].clicked.connect(self.create_honeypot)
         self.buttons["logs"].clicked.connect(self.view_logs)
         for btn in self.buttons.values():
-            grid.addWidget(btn)
-        card.body.addLayout(grid)
-        return card
+            row.addWidget(btn)
+        return row
 
-    def build_load_card(self):
-        card = Card("System load", "CPU usage over the last minute")
-        self.load_label = QLabel("CPU --  ·  RAM --")
-        self.load_label.setObjectName("Muted")
-        self.load_label.setStyleSheet("font-weight: 600;")
-        card.header.addWidget(self.load_label)
-        self.graph = SystemLoadGraph()
-        self.graph.sampled.connect(self.on_load_sample)
-        card.body.addWidget(self.graph)
-        return card
+    def build_activity(self):
+        card = Card("Activity", "Live feed of what SecureVault sees")
+        segment = QFrame()
+        segment.setObjectName("Segment")
+        seg_layout = QHBoxLayout(segment)
+        seg_layout.setContentsMargins(3, 3, 3, 3)
+        seg_layout.setSpacing(2)
+        self.filter_group = QButtonGroup(self)
+        for i, label in enumerate(("All", "Alerts", "Info")):
+            b = QPushButton(label)
+            b.setProperty("variant", "chip")
+            b.setCheckable(True)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setChecked(i == 0)
+            self.filter_group.addButton(b, i)
+            seg_layout.addWidget(b)
+        self.filter_group.idClicked.connect(self.apply_filter)
 
-    def build_activity_card(self):
-        card = Card("Activity", "Live feed of events detected this session")
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Search events...")
+        self.search.setPlaceholderText("🔍  Search")
         self.search.setClearButtonEnabled(True)
-        self.search.setFixedWidth(200)
-        self.search.textChanged.connect(self.apply_filter)
-        self.level_filter = QComboBox()
-        self.level_filter.addItems(["All events", "Alerts only", "Critical", "Warnings", "Info"])
-        self.level_filter.currentIndexChanged.connect(self.apply_filter)
-        clear = QPushButton("Clear")
-        clear.setProperty("variant", "ghost")
-        clear.clicked.connect(self.clear_feed)
-        export = QPushButton("Export report")
-        export.clicked.connect(self.export_report)
-        for w in (self.search, self.level_filter, clear, export):
-            card.header.addWidget(w)
+        self.search.setFixedWidth(190)
+        self.search.textChanged.connect(lambda: self.apply_filter())
 
-        self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["TIME", "LEVEL", "EVENT"])
-        self.table.verticalHeader().setVisible(False)
-        self.table.setShowGrid(False)
-        self.table.setWordWrap(False)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.table.verticalHeader().setDefaultSectionSize(34)
-        header = self.table.horizontalHeader()
-        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.table.setColumnWidth(0, 86)
-        self.table.setColumnWidth(1, 96)
-        self.table.setTextElideMode(Qt.TextElideMode.ElideMiddle)
-        self.table.cellDoubleClicked.connect(self.open_event_path)
-        card.body.addWidget(self.table, 1)
+        more = QPushButton("⋯")
+        more.setProperty("variant", "ghost")
+        more.setFixedSize(36, 34)
+        more.setStyleSheet("padding: 0; font-size: 18px; font-weight: 800;")
+        more.setCursor(Qt.CursorShape.PointingHandCursor)
+        more_menu = QMenu(self)
+        more_menu.addAction("Export evidence report…", self.export_report)
+        more_menu.addAction("Clear feed", lambda: self.feed.clear())
+        more.clicked.connect(lambda: more_menu.exec(more.mapToGlobal(QPoint(more.width() - more_menu.sizeHint().width(), more.height() + 4))))
 
-        self.empty_hint = QLabel("No events match the current filter")
-        self.empty_hint.setObjectName("Muted")
-        self.empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_hint.hide()
-        card.body.addWidget(self.empty_hint)
+        card.header.addWidget(segment)
+        card.header.addWidget(self.search)
+        card.header.addWidget(more)
+
+        self.feed = ActivityFeed(self._short)
+        self.feed.event_activated.connect(self.open_event_path)
+        card.body.addWidget(self.feed, 1)
+        self.activity_card = card
         return card
 
     def setup_tray_icon(self):
@@ -464,9 +544,54 @@ class SecureVaultGUI(QMainWindow):
         if QSystemTrayIcon.isSystemTrayAvailable():
             self.tray_icon.show()
 
+    # ----------------------------------------------------------- entrance
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._entered:
+            self._entered = True
+            QTimer.singleShot(0, self.play_entrance)
+
+    def play_entrance(self):
+        """Cards fade in and float up one after another."""
+        widgets = [self.hero, self.protection_card, *self.stats, *self.buttons.values(), self.activity_card]
+        self._entrance = QParallelAnimationGroup(self)
+        for i, w in enumerate(widgets):
+            had_shadow = w.graphicsEffect() is not None
+            effect = QGraphicsOpacityEffect(w)
+            effect.setOpacity(0.0)
+            w.setGraphicsEffect(effect)
+            fade = QPropertyAnimation(effect, b"opacity")
+            fade.setDuration(650)
+            fade.setStartValue(0.0)
+            fade.setEndValue(1.0)
+            fade.setEasingCurve(QEasingCurve.Type.OutCubic)
+            end = w.pos()
+            slide = QPropertyAnimation(w, b"pos")
+            slide.setDuration(650)
+            slide.setStartValue(end + QPoint(0, 22))
+            slide.setEndValue(end)
+            slide.setEasingCurve(QEasingCurve.Type.OutCubic)
+            both = QParallelAnimationGroup()
+            both.addAnimation(fade)
+            both.addAnimation(slide)
+            seq = QSequentialAnimationGroup()
+            seq.addPause(i * 55)
+            seq.addAnimation(both)
+            seq.finished.connect(lambda w=w, s=had_shadow: self._finish_entrance(w, s))
+            self._entrance.addAnimation(seq)
+        self._entrance.start()
+
+    def _finish_entrance(self, widget, shadow):
+        if shadow:
+            add_shadow(widget, 28 if isinstance(widget, StatChip) else 36, 8 if isinstance(widget, StatChip) else 10)
+        else:
+            widget.setGraphicsEffect(None)
+
     # ------------------------------------------------------------ workers
 
-    def _silent(self, event):
+    @staticmethod
+    def _silent(event):
         return event
 
     def sink(self, event):
@@ -500,10 +625,9 @@ class SecureVaultGUI(QMainWindow):
         elif key == "scan":
             self.buttons["scan"].set_busy(False)
             if result is not None:
-                self.last_scan = datetime.datetime.now()
                 issues = len(result["modified"]) + len(result["deleted"])
-                self.scan_text.setText(f"Last scan {self.last_scan:%H:%M:%S}: "
-                                       + (f"{issues} change(s) found" if issues else "no changes"))
+                self.buttons["scan"].set_description(
+                    f"Last run {datetime.datetime.now():%H:%M} · " + (f"{issues} change(s)" if issues else "all clear"))
         elif key == "honeypot":
             self.buttons["honeypot"].set_busy(False)
             self.refresh_honeypot()
@@ -526,8 +650,9 @@ class SecureVaultGUI(QMainWindow):
     def on_event(self, event):
         self.events.append(event)
         self.counts[event.level] = self.counts.get(event.level, 0) + 1
-        self.add_event_row(event)
-        self.status_text.setText(event.message)
+        self.feed.add(event)
+        if self.stream.running:
+            self.stream.publish(event)
 
         now = time.time()
         if event.level == CRITICAL:
@@ -543,8 +668,7 @@ class SecureVaultGUI(QMainWindow):
             # Individual scan findings go to the feed only; the scan summary gets the toast
             per_file_scan = event.category == "scan" and event.path
             if not per_file_scan and now - self._last_toast > 1.2:
-                title = {"warning": "Warning", "success": "Done"}[event.level]
-                self.toasts.show(title, self._short(event), event.level)
+                self.toasts.show({"warning": "Heads up", "success": "Done"}[event.level], self._short(event), event.level)
                 self._last_toast = now
             if event.level == WARNING and not per_file_scan and now - self._last_beep > 3:
                 SoundManager.play_warning()
@@ -552,11 +676,11 @@ class SecureVaultGUI(QMainWindow):
 
         if event.category == "honeypot":
             self.refresh_honeypot()
-        self.refresh_threats()
+        self.refresh_alerts()
         self.refresh_protection()
 
     def _short(self, event):
-        """Toast-sized message: full paths are reduced to file names."""
+        """Compact message: full paths are reduced to file names."""
         message = event.message
         if event.path:
             for part in event.path.split(" -> "):
@@ -564,119 +688,79 @@ class SecureVaultGUI(QMainWindow):
         message = message.replace(self.folder_to_monitor + os.sep, "")
         return message if len(message) <= 160 else message[:157] + "..."
 
-    def add_event_row(self, event):
-        self.table.insertRow(0)
-        time_item = QTableWidgetItem(time.strftime("%H:%M:%S", time.localtime(event.timestamp)))
-        time_item.setForeground(QColor(theme.MUTED))
-        time_item.setToolTip(event.time_str)
-        color = QColor(theme.LEVEL_COLORS.get(event.level, theme.INFO))
-        level_item = QTableWidgetItem(f"●  {theme.LEVEL_LABELS.get(event.level, event.level.upper())}")
-        level_item.setForeground(color)
-        font = QFont(theme.FONT_FAMILY, 8)
-        font.setBold(True)
-        level_item.setFont(font)
-        message_item = QTableWidgetItem(event.message)
-        message_item.setToolTip(event.message + ("\n\nDouble-click to show in folder" if event.path else ""))
-        if event.level == CRITICAL:
-            message_item.setForeground(QColor("#fecaca"))
-        message_item.setData(Qt.ItemDataRole.UserRole, event)
-        self.table.setItem(0, 0, time_item)
-        self.table.setItem(0, 1, level_item)
-        self.table.setItem(0, 2, message_item)
-        if self.table.rowCount() > MAX_FEED_ROWS:
-            self.table.removeRow(self.table.rowCount() - 1)
-        self._apply_filter_to_row(0)
-        self._update_empty_hint()
-
-    def _row_matches(self, event):
-        needle = self.search.text().strip().lower()
-        if needle and needle not in event.message.lower():
-            return False
-        allowed = {
-            0: None,
-            1: {WARNING, CRITICAL},
-            2: {CRITICAL},
-            3: {WARNING},
-            4: {INFO, SUCCESS},
-        }[self.level_filter.currentIndex()]
-        return allowed is None or event.level in allowed
-
-    def _apply_filter_to_row(self, row):
-        item = self.table.item(row, 2)
-        event = item.data(Qt.ItemDataRole.UserRole) if item else None
-        self.table.setRowHidden(row, bool(event) and not self._row_matches(event))
-
     def apply_filter(self, *_):
-        for row in range(self.table.rowCount()):
-            self._apply_filter_to_row(row)
-        self._update_empty_hint()
+        levels = {0: None, 1: {WARNING, CRITICAL}, 2: {INFO, SUCCESS}}[self.filter_group.checkedId()]
+        self.feed.set_filter(levels or set(), self.search.text())
 
-    def _update_empty_hint(self):
-        visible = any(not self.table.isRowHidden(r) for r in range(self.table.rowCount()))
-        self.empty_hint.setVisible(not visible)
-
-    def clear_feed(self):
-        self.table.setRowCount(0)
-        self._update_empty_hint()
-
-    def open_event_path(self, row, _column):
-        item = self.table.item(row, 2)
-        event = item.data(Qt.ItemDataRole.UserRole) if item else None
+    def open_event_path(self, event):
         if not (event and event.path):
             return
         target = event.path if os.path.isdir(event.path) else os.path.dirname(event.path)
         if os.path.isdir(target):
             QDesktopServices.openUrl(QUrl.fromLocalFile(target))
 
-    def on_load_sample(self, cpu, mem):
-        self.load_label.setText(f"CPU {cpu:.0f}%  ·  RAM {mem:.0f}%")
+    def sample_load(self):
+        import psutil
+        cpu = psutil.cpu_percent(None)
+        mem = psutil.virtual_memory().percent
+        color = theme.CRITICAL if cpu >= 85 else theme.WARNING if cpu >= 60 else theme.ACCENT
+        self.stat_cpu.set(f"{cpu:.0f}%", f"RAM {mem:.0f}%", color)
+        self.sparkline.add(cpu, color)
 
     # ------------------------------------------------------------- status
+
+    def refresh_all(self):
+        self.refresh_protection()
+        self.refresh_honeypot()
+        self.refresh_alerts()
+        self.refresh_baseline()
+        self.refresh_stream_pill()
+
+    def _status(self):
+        if self.threat_active:
+            return "threat"
+        return "protected" if "file_monitor" in self._stop_events else "idle"
 
     def refresh_protection(self):
         file_on = "file_monitor" in self._stop_events
         cpu_on = "cpu_monitor" in self._stop_events
-        self.file_row.state.setText(f"Watching {os.path.basename(self.folder_to_monitor) or self.folder_to_monitor}"
-                                    if file_on else "Off - changes are not being watched")
-        self.cpu_row.state.setText("Watching for sustained high CPU usage" if cpu_on else "Off")
-        if file_on and cpu_on:
-            self.stat_protection.set("Full", "File and process monitors running", theme.SUCCESS)
-        elif file_on:
-            self.stat_protection.set("Active", "File monitor running", theme.SUCCESS)
-        elif cpu_on:
-            self.stat_protection.set("Partial", "Only the process monitor is running", theme.WARNING)
-        else:
-            self.stat_protection.set("Off", "Turn on the real-time monitor", theme.MUTED)
+        name = os.path.basename(self.folder_to_monitor) or self.folder_to_monitor
+        self.file_row.state.setText(f"Watching {name}" if file_on else "Off")
+        self.cpu_row.state.setText("Watching for sustained high CPU" if cpu_on else "Off")
 
-        if self.threat_active:
-            self.status_pill.set_state("THREAT DETECTED", theme.CRITICAL, pulse=True,
-                                       tooltip="A critical alert was raised. Click to acknowledge.")
-            self.logo.set_color(theme.CRITICAL)
-        elif file_on:
-            self.status_pill.set_state("PROTECTED", theme.SUCCESS, pulse=True, tooltip="Real-time protection is on")
-            self.logo.set_color(theme.ACCENT)
+        status = self._status()
+        self.ring.set_state(status)
+        if status == "threat":
+            self.headline.setText("Threat detected")
+            self.subline.setText("Review the activity feed, then click the shield to acknowledge")
+            self.status_pill.set_state("Threat", theme.CRITICAL, pulse=True, tooltip="Click to acknowledge")
+        elif status == "protected":
+            self.headline.setText("You're protected")
+            self.subline.setText(f"Watching {name} in real time")
+            self.status_pill.set_state("Protected", theme.SUCCESS, pulse=True, tooltip="Real-time protection is on")
         else:
-            self.status_pill.set_state("UNPROTECTED", theme.WARNING, tooltip="Real-time file monitoring is off")
-            self.logo.set_color(theme.ACCENT)
+            self.headline.setText("Protection is off")
+            self.subline.setText("Turn on the real-time monitor to stay protected")
+            self.status_pill.set_state("Unprotected", theme.WARNING, tooltip="Real-time file monitoring is off")
+        self.push_stream_state()
 
     def acknowledge_threat(self):
         if self.threat_active:
             self.threat_active = False
-            self.refresh_protection()
             self.on_event(emit(self._silent, INFO, "Threat alert acknowledged"))
 
-    def refresh_threats(self):
+    def refresh_alerts(self):
         crit, warn = self.counts.get(CRITICAL, 0), self.counts.get(WARNING, 0)
-        accent = theme.CRITICAL if crit else theme.WARNING if warn else theme.SUCCESS
-        caption = f"{crit} critical · {warn} warnings" if crit or warn else "Nothing suspicious so far"
-        self.stat_threats.set(crit + warn, caption, accent)
+        color = theme.CRITICAL if crit else theme.WARNING if warn else theme.SUCCESS
+        caption = f"{crit} critical · {warn} warnings" if crit or warn else "Nothing suspicious"
+        self.stat_alerts.set(crit + warn, caption, color)
 
     def refresh_honeypot(self):
-        path = honeypot_path(self.folder_to_monitor)
-        if os.path.exists(path):
-            self.stat_honeypot.set("Deployed", os.path.basename(path), theme.SUCCESS)
+        if os.path.exists(honeypot_path(self.folder_to_monitor)):
+            self.stat_honeypot.set("Deployed", "Decoy is in place", theme.SUCCESS)
         else:
-            self.stat_honeypot.set("Not deployed", "Deploy a decoy to catch intruders", theme.MUTED)
+            self.stat_honeypot.set("Off", "Deploy a decoy file", theme.SUBTLE)
+        self.push_stream_state()
 
     @staticmethod
     def _meta_from(baseline):
@@ -690,17 +774,73 @@ class SecureVaultGUI(QMainWindow):
     def refresh_baseline(self):
         meta = self.baseline_meta
         if not meta:
-            self.stat_baseline.set("None", "Create a baseline to enable scans", theme.WARNING)
-            return
-        created = meta.get("created")
-        when = created.replace("T", " ")[:16] if created else "unknown date"
-        folder = meta.get("folder")
-        if folder and os.path.normcase(folder) != os.path.normcase(self.folder_to_monitor):
-            self.stat_baseline.set(f"{meta['count']:,} files", f"Made for another folder: {folder}", theme.WARNING)
+            self.stat_baseline.set("None", "Create one to enable scans", theme.WARNING)
         else:
-            self.stat_baseline.set(f"{meta['count']:,} files", f"Created {when}", theme.SUCCESS)
+            created = meta.get("created")
+            when = created.replace("T", " ")[5:16] if created else "unknown date"
+            folder = meta.get("folder")
+            if folder and os.path.normcase(folder) != os.path.normcase(self.folder_to_monitor):
+                self.stat_baseline.set(meta["count"], "Made for another folder", theme.WARNING, fmt="{:,} files")
+            else:
+                self.stat_baseline.set(meta["count"], f"Created {when}", theme.ACCENT, fmt="{:,} files")
+        self.push_stream_state()
+
+    # -------------------------------------------------------- live stream
+
+    def open_stream_dialog(self):
+        StreamDialog(self).exec()
+        self.refresh_stream_pill()
+
+    def start_stream(self, lan=False):
+        try:
+            self.stream.seed(self.events[-300:])
+            url = self.stream.start(lan)
+        except OSError as e:
+            self.on_event(emit(self._silent, WARNING, f"Live stream could not start: {e}"))
+            return
+        self.push_stream_state()
+        self.refresh_stream_pill()
+        self.on_event(emit(self._silent, SUCCESS, f"Live stream started ({'local network' if lan else 'this computer'})"))
+        return url
+
+    def stop_stream(self):
+        self.stream.stop()
+        self.refresh_stream_pill()
+        self.on_event(emit(self._silent, INFO, "Live stream stopped"))
+
+    def refresh_stream_pill(self):
+        if self.stream.running:
+            n = self.stream.viewers
+            self.live_pill.set_state(f"Live · {n} watching", theme.ACCENT_DEEP, pulse=True,
+                                     tooltip="Streaming to the web. Click to manage.")
+        else:
+            self.live_pill.set_state("Go live", theme.MUTED, tooltip="Stream SecureVault to a browser")
+
+    def push_stream_state(self):
+        if not getattr(self, "stream", None) or not self.stream.running:
+            return
+        meta = self.baseline_meta
+        crit, warn = self.counts.get(CRITICAL, 0), self.counts.get(WARNING, 0)
+        self.stream.update_state(
+            status=self._status(),
+            headline=self.headline.text(),
+            subline=self.subline.text(),
+            folder=os.path.basename(self.folder_to_monitor) or self.folder_to_monitor,
+            file_monitor="file_monitor" in self._stop_events,
+            cpu_monitor="cpu_monitor" in self._stop_events,
+            alerts=crit + warn, critical=crit, warnings=warn,
+            baseline=f"{meta['count']:,} files" if meta else "None",
+            baseline_sub=self.stat_baseline.caption.text(),
+            honeypot=self.stat_honeypot.value.text(),
+            honeypot_sub=self.stat_honeypot.caption.text(),
+        )
 
     # ------------------------------------------------------------ actions
+
+    def _update_folder_btn(self):
+        name = os.path.basename(self.folder_to_monitor) or self.folder_to_monitor
+        self.folder_btn.setText(f"📁   {name}   ▾")
+        self.folder_btn.setToolTip(self.folder_to_monitor)
 
     def change_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Folder to Protect", self.folder_to_monitor)
@@ -710,7 +850,7 @@ class SecureVaultGUI(QMainWindow):
         if folder == self.folder_to_monitor:
             return
         self.folder_to_monitor = folder
-        self.scope_label.setText(folder)
+        self._update_folder_btn()
         restart = "file_monitor" in self._stop_events
         self.on_event(emit(self._silent, INFO, f"Protected folder changed to {folder}"))
         if restart:
@@ -721,23 +861,24 @@ class SecureVaultGUI(QMainWindow):
         self.refresh_baseline()
 
     def create_baseline(self):
-        self.buttons["baseline"].set_busy(True, "Indexing files...")
+        self.buttons["baseline"].set_busy(True, "Indexing files…")
         self.run_task("baseline", create_baseline, self.folder_to_monitor, self.sink)
 
     def check_changes(self):
-        self.buttons["scan"].set_busy(True, "Scanning...")
+        self.buttons["scan"].set_busy(True, "Scanning…")
         self.run_task("scan", check_for_changes, self.folder_to_monitor, self.sink)
 
     def create_honeypot(self):
-        self.buttons["honeypot"].set_busy(True, "Deploying...")
+        self.buttons["honeypot"].set_busy(True, "Deploying…")
         self.run_task("honeypot", create_honeypot, self.folder_to_monitor, self.sink)
 
     def set_file_monitor(self, enabled):
         self._set_monitor("file_monitor", enabled, start_real_time_monitor,
-                          lambda stop: (self.folder_to_monitor, self.sink, stop))
+                          lambda stop: ((self.folder_to_monitor, self.sink, stop), {}))
 
     def set_cpu_monitor(self, enabled):
-        self._set_monitor("cpu_monitor", enabled, monitor_processes_sustained, None)
+        self._set_monitor("cpu_monitor", enabled, monitor_processes_sustained,
+                          lambda stop: ((), {"alert_queue": self.sink, "stop_event": stop}))
 
     def _set_monitor(self, key, enabled, fn, args_for):
         if enabled:
@@ -745,10 +886,8 @@ class SecureVaultGUI(QMainWindow):
                 return
             stop = threading.Event()
             self._stop_events[key] = stop
-            if args_for:
-                self.run_task(key, fn, *args_for(stop))
-            else:
-                self.run_task(key, fn, alert_queue=self.sink, stop_event=stop)
+            args, kwargs = args_for(stop)
+            self.run_task(key, fn, *args, **kwargs)
         else:
             stop = self._stop_events.pop(key, None)
             if stop:
@@ -766,8 +905,8 @@ class SecureVaultGUI(QMainWindow):
         self._update_sound_btn()
 
     def _update_sound_btn(self):
-        self.sound_btn.setText("🔔  Sound on" if SoundManager.enabled else "🔕  Sound off")
-        self.sound_btn.setToolTip("Toggle audible alerts")
+        self.sound_btn.setText("🔔" if SoundManager.enabled else "🔕")
+        self.sound_btn.setToolTip("Sound alerts on" if SoundManager.enabled else "Sound alerts off")
 
     def export_report(self):
         stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -792,7 +931,7 @@ class SecureVaultGUI(QMainWindow):
             color = theme.LEVEL_COLORS.get(ev.level, theme.INFO)
             rows.append(
                 f"<tr><td class='t'>{html.escape(ev.time_str)}</td>"
-                f"<td><span class='badge' style='color:{color};border-color:{color}'>"
+                f"<td><span class='badge' style='color:{color};background:{theme.soft(color, 0.12)}'>"
                 f"{html.escape(theme.LEVEL_LABELS.get(ev.level, ev.level))}</span></td>"
                 f"<td>{html.escape(ev.category)}</td><td class='m'>{html.escape(ev.message)}</td></tr>"
             )
@@ -802,19 +941,21 @@ class SecureVaultGUI(QMainWindow):
 <html lang="en"><head><meta charset="utf-8">
 <title>{APP_NAME} Evidence Report</title>
 <style>
-body {{ font-family: 'Segoe UI', system-ui, sans-serif; background: {theme.BG}; color: {theme.TEXT}; margin: 0; padding: 32px; }}
-h1 {{ margin: 0 0 4px; font-size: 24px; }}
-.sub {{ color: {theme.MUTED}; margin-bottom: 24px; }}
-.cards {{ display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }}
-.card {{ background: {theme.SURFACE}; border: 1px solid {theme.BORDER}; border-radius: 12px; padding: 14px 18px; min-width: 160px; }}
-.card b {{ display: block; font-size: 22px; }}
-.card span {{ color: {theme.MUTED}; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }}
-table {{ width: 100%; border-collapse: collapse; background: {theme.SURFACE}; border: 1px solid {theme.BORDER}; border-radius: 12px; overflow: hidden; }}
-th {{ text-align: left; color: {theme.MUTED}; font-size: 11px; text-transform: uppercase; padding: 10px 12px; border-bottom: 1px solid {theme.BORDER}; }}
-td {{ padding: 8px 12px; border-bottom: 1px solid {theme.SURFACE_2}; font-size: 13px; vertical-align: top; }}
+body {{ font-family: 'Segoe UI', system-ui, sans-serif; background: {theme.BG}; color: {theme.TEXT}; margin: 0; padding: 36px; }}
+h1 {{ margin: 0 0 4px; font-size: 26px; }}
+.sub {{ color: {theme.MUTED}; margin-bottom: 26px; }}
+.cards {{ display: flex; gap: 16px; margin-bottom: 26px; flex-wrap: wrap; }}
+.card {{ background: #fff; border: 1px solid {theme.BORDER}; border-radius: 16px; padding: 16px 20px; min-width: 170px;
+         box-shadow: 0 10px 28px rgba(76,141,246,.10); }}
+.card b {{ display: block; font-size: 24px; }}
+.card span {{ color: {theme.MUTED}; font-size: 12px; font-weight: 600; }}
+table {{ width: 100%; border-collapse: collapse; background: #fff; border-radius: 16px; overflow: hidden;
+         box-shadow: 0 10px 28px rgba(76,141,246,.10); }}
+th {{ text-align: left; color: {theme.MUTED}; font-size: 12px; padding: 12px 14px; border-bottom: 1px solid {theme.BORDER}; }}
+td {{ padding: 10px 14px; border-bottom: 1px solid {theme.SURFACE_3}; font-size: 13px; vertical-align: top; }}
 td.t {{ color: {theme.MUTED}; white-space: nowrap; }}
 td.m {{ word-break: break-all; }}
-.badge {{ border: 1px solid; border-radius: 10px; padding: 1px 8px; font-size: 11px; font-weight: 700; }}
+.badge {{ border-radius: 999px; padding: 3px 10px; font-size: 11px; font-weight: 700; }}
 </style></head><body>
 <h1>{APP_NAME} Evidence Report</h1>
 <div class="sub">Generated {generated} · Protected folder: {html.escape(self.folder_to_monitor)}</div>
@@ -844,8 +985,9 @@ td.m {{ word-break: break-all; }}
         self.activateWindow()
 
     def closeEvent(self, event):
-        """Keep protecting from the tray while a monitor is running."""
-        if not self._quitting and self._stop_events and self.tray_icon.isVisible():
+        """Keep protecting from the tray while a monitor or the stream is running."""
+        busy = self._stop_events or self.stream.running
+        if not self._quitting and busy and self.tray_icon.isVisible():
             self.hide()
             if not self._tray_hint_shown:
                 self._tray_hint_shown = True
@@ -862,8 +1004,31 @@ td.m {{ word-break: break-all; }}
         for stop in self._stop_events.values():
             stop.set()
         self._stop_events.clear()
+        self.stream.stop()
         self.tray_icon.hide()
         QApplication.instance().quit()
+
+
+def apply_light_palette(app):
+    """Force a light palette so native widgets match the theme in OS dark mode."""
+    palette = QPalette()
+    roles = {
+        QPalette.ColorRole.Window: theme.BG,
+        QPalette.ColorRole.WindowText: theme.TEXT,
+        QPalette.ColorRole.Base: theme.SURFACE,
+        QPalette.ColorRole.AlternateBase: theme.SURFACE_2,
+        QPalette.ColorRole.Text: theme.TEXT,
+        QPalette.ColorRole.Button: theme.SURFACE,
+        QPalette.ColorRole.ButtonText: theme.TEXT,
+        QPalette.ColorRole.Highlight: theme.ACCENT,
+        QPalette.ColorRole.HighlightedText: "#ffffff",
+        QPalette.ColorRole.ToolTipBase: theme.TEXT,
+        QPalette.ColorRole.ToolTipText: "#ffffff",
+        QPalette.ColorRole.PlaceholderText: theme.SUBTLE,
+    }
+    for role, color in roles.items():
+        palette.setColor(role, QColor(color))
+    app.setPalette(palette)
 
 
 def run_gui(show_splash=True):
@@ -878,6 +1043,7 @@ def run_gui(show_splash=True):
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
     app.setStyle("Fusion")
+    apply_light_palette(app)
     app.setStyleSheet(theme.STYLESHEET)
     app.setWindowIcon(make_app_icon())
     app.setQuitOnLastWindowClosed(False)

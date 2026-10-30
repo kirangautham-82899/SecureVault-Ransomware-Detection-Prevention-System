@@ -509,6 +509,48 @@ def launch_gui():
     run_gui()
 
 
+def run_live_stream(folder, lan=False):
+    """Headless mode: monitor ``folder`` and stream everything to the web viewer."""
+    from stream import LiveStreamServer
+
+    server = LiveStreamServer()
+    counts = {WARNING: 0, CRITICAL: 0}
+    stop = threading.Event()
+    baseline = load_baseline()
+
+    def push_state(threat=False):
+        server.update_state(
+            status="threat" if threat else "protected",
+            headline="Threat detected" if threat else "You're protected",
+            subline=f"Watching {os.path.basename(folder) or folder} in real time",
+            folder=os.path.basename(folder) or folder,
+            file_monitor=True, cpu_monitor=True,
+            alerts=counts[WARNING] + counts[CRITICAL], critical=counts[CRITICAL], warnings=counts[WARNING],
+            baseline=f"{len(baseline['files']):,} files" if baseline else "None",
+            honeypot="Deployed" if os.path.exists(honeypot_path(folder)) else "Off",
+        )
+
+    def sink(event):
+        print(f"[{event.time_str}] {event.level.upper():8} {event.message}")
+        if event.level in counts:
+            counts[event.level] += 1
+        server.publish(event)
+        push_state(threat=counts[CRITICAL] > 0)
+
+    url = server.start(lan=lan)
+    push_state()
+    print(f"\n📡 Live stream running: {url}")
+    print("   Anyone with this link can watch. Press Ctrl+C to stop.\n")
+    threading.Thread(target=monitor_processes_sustained,
+                     kwargs={"alert_queue": sink, "stop_event": stop}, daemon=True).start()
+    try:
+        start_real_time_monitor(folder, sink, stop)
+    finally:
+        stop.set()
+        server.stop()
+        print("Live stream stopped.")
+
+
 def main_menu():
     folder_to_monitor = os.getcwd()
 
@@ -522,6 +564,7 @@ def main_menu():
         print("5. Start Suspicious Process Monitoring (CPU)")
         print("6. Launch GUI Dashboard")
         print("7. Change Folder")
+        print("8. Live Stream to Browser (headless)")
         print("0. Exit")
         try:
             choice = input("Choose an option: ").strip()
@@ -550,6 +593,9 @@ def main_menu():
                 folder_to_monitor = os.path.abspath(new_folder)
             else:
                 print("Folder not found.")
+        elif choice == "8":
+            lan = input("Allow devices on your network to watch? [y/N]: ").strip().lower() == "y"
+            run_live_stream(folder_to_monitor, lan)
         elif choice == "0":
             print(f"Exiting {APP_NAME}.")
             break
@@ -558,7 +604,15 @@ def main_menu():
 
 
 if __name__ == "__main__":
-    if "--gui" in sys.argv[1:]:
+    try:  # Emoji in console output must never crash a redirected or legacy console
+        sys.stdout.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
+    args = sys.argv[1:]
+    if "--gui" in args:
         launch_gui()
+    elif "--stream" in args:
+        rest = [a for a in args if not a.startswith("--")]
+        run_live_stream(os.path.abspath(rest[0]) if rest else os.getcwd(), lan="--lan" in args)
     else:
         main_menu()
