@@ -1,2 +1,3 @@
-watchdog
-psutil
+watchdog>=3.0
+psutil>=5.9
+PyQt6>=6.5

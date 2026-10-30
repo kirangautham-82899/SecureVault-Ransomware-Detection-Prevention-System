@@ -1,29 +1,33 @@
 # main.py
+"""SecureVault core engine and command-line interface.
+
+The engine exposes plain functions that report what they find as ``Event``
+objects. Every function accepts an optional ``sink`` (or ``alert_queue``):
+either a callable, an object with a ``put`` method (e.g. ``queue.Queue``),
+or ``None`` to print to the console.
+"""
 import os
-import hashlib
+import re
+import sys
 import json
 import time
-import psutil
+import hashlib
+import datetime
+import threading
 from collections import defaultdict, deque
+from dataclasses import dataclass, field
+
+import psutil
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-import threading
-import platform
-import tkinter as tk
-import queue
-# At the top of main.py, import the GUI launcher
-def launch_gui():
-    import sys
-    from PyQt6.QtWidgets import QApplication
-    from gui.main_gui import SecureVaultGUI
 
-    app = QApplication(sys.argv)
-    window = SecureVaultGUI()
-    window.show()
-    sys.exit(app.exec())
+APP_NAME = "SecureVault"
+APP_VERSION = "2.0.0"
 
-HASH_DB_FILE = "hash_db.json"
-LOG_FILE = "suspicious_activity.log"
+# Runtime data lives next to the application, not in whatever folder it was launched from
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+HASH_DB_FILE = os.path.join(APP_DIR, "hash_db.json")
+LOG_FILE = os.path.join(APP_DIR, "suspicious_activity.log")
 HONEYPOT_FILE = "honeypot_fake_sensitive.txt"
 
 # Default exclusions to reduce noise
@@ -31,232 +35,428 @@ EXCLUDED_DIRS = {"AppData", ".gemini", ".git", ".vscode", "__pycache__", "node_m
 EXCLUDED_FILES = {"ntuser.dat", "NTUSER.DAT", "pagefile.sys", "swapfile.sys", "dumpstack.log.tmp"}
 EXCLUDED_EXTENSIONS = {".tmp", ".log", ".pyc", ".pyd", ".ldb", ".vscdb-journal"}
 
-def should_ignore(file_path):
-    """Check if file should be ignored based on global exclusions"""
-    path_parts = file_path.split(os.sep)
-    filename = os.path.basename(file_path)
-    
+# Extensions commonly appended by ransomware families after encrypting a file
+RANSOMWARE_EXTENSIONS = {
+    ".locked", ".encrypted", ".enc", ".crypt", ".crypted", ".cry", ".crypto",
+    ".locky", ".zepto", ".cerber", ".wannacry", ".wncry", ".wcry", ".ryuk",
+    ".lockbit", ".conti", ".petya", ".djvu", ".pay", ".ransom", ".kraken",
+}
+
+_EXCLUDED_DIRS_LOWER = {d.lower() for d in EXCLUDED_DIRS}
+_EXCLUDED_FILES_LOWER = {f.lower() for f in EXCLUDED_FILES}
+_APP_FILES = {os.path.normcase(os.path.normpath(p)) for p in (HASH_DB_FILE, LOG_FILE)}
+
+INFO, SUCCESS, WARNING, CRITICAL = "info", "success", "warning", "critical"
+
+
+@dataclass
+class Event:
+    """A single thing SecureVault noticed or did."""
+    level: str
+    message: str
+    category: str = "system"
+    path: str = None
+    timestamp: float = field(default_factory=time.time)
+
+    @property
+    def time_str(self):
+        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.timestamp))
+
+
+_log_lock = threading.Lock()
+
+
+def log_suspicious_activity(message, level=INFO):
+    try:
+        with _log_lock, open(LOG_FILE, "a", encoding="utf-8") as f:
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            f.write(f"[{timestamp}] [{level.upper()}] {message}\n")
+    except OSError:
+        pass
+
+
+def emit(sink, level, message, category="system", path=None, log=True):
+    """Deliver an event to the sink and record it in the activity log."""
+    event = Event(level, message, category, path)
+    if log:
+        log_suspicious_activity(message, level)
+    if sink is None:
+        print(f"[{event.time_str}] {level.upper():8} {message}")
+    elif callable(sink):
+        sink(event)
+    else:
+        sink.put(event)
+    return event
+
+
+def should_ignore(file_path, root=None):
+    """Check if file should be ignored based on global exclusions.
+
+    When ``root`` is given, only the part of the path below it is checked, so
+    a protected folder that itself lives inside e.g. AppData still works.
+    """
+    if root:
+        try:
+            rel = os.path.relpath(file_path, root)
+            if not rel.startswith(".."):
+                file_path = rel
+        except ValueError:  # Different drive on Windows
+            pass
+    path_parts = re.split(r"[\\/]", file_path)
+    filename = path_parts[-1]
+
     # Check for excluded directories in the path
-    for part in path_parts:
-        if part in EXCLUDED_DIRS:
-            return True
-            
-    # Check for specific filenames
-    if filename in EXCLUDED_FILES or filename.lower() in {f.lower() for f in EXCLUDED_FILES}:
+    if any(part.lower() in _EXCLUDED_DIRS_LOWER for part in path_parts):
         return True
-        
+
+    # Check for specific filenames
+    if filename.lower() in _EXCLUDED_FILES_LOWER:
+        return True
+
     # Check extensions
     _, ext = os.path.splitext(filename)
     if ext.lower() in EXCLUDED_EXTENSIONS:
         return True
-        
+
     # Check system/temp files
     if filename.startswith("~") or filename.startswith("$"):
         return True
-        
+
     return False
 
-def notify_user(message, title="Alert", duration=5000):
-    def popup():
-        root = tk.Tk()
-        root.title(title)
-        root.geometry("300x100+1000+50")
-        root.attributes("-topmost", True)
-        root.resizable(False, False)
-        root.overrideredirect(True)
-        label = tk.Label(root, text=message, font=("Segoe UI", 10), fg="white", bg="#333333", wraplength=280)
-        label.pack(expand=True, fill="both")
-        root.after(duration, root.destroy)
-        root.mainloop()
 
-    threading.Thread(target=popup, daemon=True).start()
+def is_app_file(file_path):
+    """True for SecureVault's own data files, which must never raise alerts."""
+    return os.path.normcase(os.path.normpath(file_path)) in _APP_FILES
 
-def log_suspicious_activity(message):
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        f.write(f"[{timestamp}] {message}\n")
+
+def is_honeypot(file_path):
+    return os.path.basename(file_path).lower() == HONEYPOT_FILE.lower()
+
+
+def has_ransomware_extension(file_path):
+    return os.path.splitext(file_path)[1].lower() in RANSOMWARE_EXTENSIONS
+
 
 def calculate_hash(file_path):
     sha256 = hashlib.sha256()
     try:
         with open(file_path, "rb") as f:
-            for chunk in iter(lambda: f.read(4096), b""):
+            for chunk in iter(lambda: f.read(65536), b""):
                 sha256.update(chunk)
         return sha256.hexdigest()
-    except PermissionError:
-        # Silent ignore for permission errors to reduce noise
+    except OSError:
+        # Locked, missing or unreadable files are skipped silently to reduce noise
         return None
-    except Exception as e:
-        # print(f"Error reading {file_path}: {e}") # Suppress noisy reading errors
-        return None
+
 
 def normalize_path(file_path):
     return os.path.normpath(file_path)
 
-def create_baseline(folder_to_monitor):
-    hash_data = {}
-    for root, dirs, files in os.walk(folder_to_monitor):
+
+def iter_monitored_files(folder):
+    """Yield every file under ``folder`` that SecureVault should track."""
+    for root, dirs, files in os.walk(folder):
         # Modify dirs in-place to skip excluded directories (case-insensitive)
-        dirs[:] = [d for d in dirs if d not in EXCLUDED_DIRS and d.lower() not in {ed.lower() for ed in EXCLUDED_DIRS}]
-        
-        for file in files:
-            if file in (HASH_DB_FILE, HONEYPOT_FILE):
+        dirs[:] = [d for d in dirs if d.lower() not in _EXCLUDED_DIRS_LOWER]
+        for name in files:
+            full_path = normalize_path(os.path.join(root, name))
+            if is_honeypot(full_path) or is_app_file(full_path) or should_ignore(full_path, folder):
                 continue
-            full_path = os.path.join(root, file)
-            
-            if should_ignore(full_path):
-                continue
-                
-            file_hash = calculate_hash(full_path)
-            if file_hash:
-                norm_path = normalize_path(full_path)
-                hash_data[norm_path] = file_hash
-    with open(HASH_DB_FILE, "w") as f:
-        json.dump(hash_data, f, indent=4)
-    print(f"✅ Baseline created at {HASH_DB_FILE}")
-    notify_user("Hash baseline successfully created.")
+            yield full_path
 
-def check_for_changes():
+
+# ---------------------------------------------------------------------------
+# Baseline
+# ---------------------------------------------------------------------------
+
+def load_baseline(db_file=HASH_DB_FILE):
+    """Return ``{"folder", "created", "files"}`` or ``None`` if no baseline exists."""
     try:
-        with open(HASH_DB_FILE, "r") as f:
-            saved_hashes = json.load(f)
-    except FileNotFoundError:
-        print("❌ Baseline file not found! Please run baseline first.")
-        notify_user("Baseline not found. Please create one first.")
-        return
+        with open(db_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if isinstance(data, dict) and "files" in data:
+        return data
+    # Legacy v1 format: a flat {path: hash} mapping
+    return {"folder": None, "created": None, "files": data}
 
-    modified_files = []
+
+def create_baseline(folder_to_monitor, sink=None, db_file=HASH_DB_FILE, stop_event=None):
+    if not os.path.isdir(folder_to_monitor):
+        emit(sink, WARNING, f"Folder not found: {folder_to_monitor}", "baseline")
+        return None
+    emit(sink, INFO, f"Indexing files in {folder_to_monitor}...", "baseline", log=False)
+
+    hash_data = {}
+    for path in iter_monitored_files(folder_to_monitor):
+        if stop_event and stop_event.is_set():
+            emit(sink, WARNING, "Baseline creation cancelled", "baseline")
+            return None
+        file_hash = calculate_hash(path)
+        if file_hash:
+            hash_data[path] = file_hash
+
+    data = {
+        "version": 2,
+        "folder": normalize_path(os.path.abspath(folder_to_monitor)),
+        "created": datetime.datetime.now().isoformat(timespec="seconds"),
+        "files": hash_data,
+    }
+    tmp_file = db_file + ".part"
+    with open(tmp_file, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    os.replace(tmp_file, db_file)
+
+    emit(sink, SUCCESS, f"Baseline created: {len(hash_data):,} files indexed", "baseline")
+    return data
+
+
+def check_for_changes(folder=None, sink=None, db_file=HASH_DB_FILE):
+    """Compare the folder against the baseline.
+
+    Returns ``{"modified", "deleted", "new", "checked"}`` or ``None`` when no
+    baseline exists. New files are only reported when ``folder`` matches the
+    folder the baseline was made from.
+    """
+    baseline = load_baseline(db_file)
+    if baseline is None:
+        emit(sink, WARNING, "No baseline found. Create a baseline first.", "scan")
+        return None
+
+    saved_hashes = baseline["files"]
+    baseline_folder = baseline.get("folder")
+    if folder and baseline_folder and os.path.normcase(normalize_path(os.path.abspath(folder))) != os.path.normcase(baseline_folder):
+        emit(sink, WARNING, f"Baseline was created for {baseline_folder}, not the selected folder. "
+                            "Only baseline files will be checked.", "scan")
+        folder = None
+
+    result = {"modified": [], "deleted": [], "new": [], "checked": len(saved_hashes)}
     for file_path, old_hash in saved_hashes.items():
         if os.path.exists(file_path):
             current_hash = calculate_hash(file_path)
-            if current_hash != old_hash:
-                modified_files.append(file_path)
+            if current_hash is not None and current_hash != old_hash:
+                result["modified"].append(file_path)
         else:
-            modified_files.append(f"{file_path} (deleted)")
+            result["deleted"].append(file_path)
 
-    if modified_files:
-        print("⚠️ ALERT! Modified or deleted files:")
-        for f in modified_files:
-            print(" -", f)
-        notify_user("Files modified or deleted! Check logs.")
+    if folder:
+        known = set(saved_hashes)
+        result["new"] = [p for p in iter_monitored_files(folder) if p not in known]
+
+    for path in result["modified"]:
+        emit(sink, WARNING, f"Modified since baseline: {path}", "scan", path)
+    for path in result["deleted"]:
+        emit(sink, WARNING, f"Deleted since baseline: {path}", "scan", path)
+    for path in result["new"]:
+        if has_ransomware_extension(path):
+            emit(sink, CRITICAL, f"New file with ransomware extension: {path}", "scan", path)
+        else:
+            emit(sink, INFO, f"New since baseline: {path}", "scan", path)
+
+    changed = len(result["modified"]) + len(result["deleted"])
+    if changed:
+        emit(sink, WARNING, f"Scan complete: {len(result['modified'])} modified, "
+                            f"{len(result['deleted'])} deleted, {len(result['new'])} new "
+                            f"({result['checked']:,} files checked)", "scan")
     else:
-        print("✅ No changes detected.")
-        notify_user("No file changes detected. All files are intact.")
+        emit(sink, SUCCESS, f"Scan complete: all {result['checked']:,} baseline files intact"
+                            + (f", {len(result['new'])} new" if result["new"] else ""), "scan")
+    return result
 
-def create_honeypot():
-    if not os.path.exists(HONEYPOT_FILE):
-        try:
-            with open(HONEYPOT_FILE, "w") as f:
-                f.write("DO NOT TOUCH! This file is a honeypot.")
-            print(f"📦 Honeypot created: {HONEYPOT_FILE}")
-            notify_user("Honeypot file created.")
-        except Exception as e:
-            print(f"⚠️ Honeypot creation error: {e}")
+
+# ---------------------------------------------------------------------------
+# Honeypot
+# ---------------------------------------------------------------------------
+
+HONEYPOT_CONTENT = """CONFIDENTIAL - Account Recovery Codes
+=====================================
+This file is a SecureVault honeypot. It contains no real data.
+Any process that modifies, renames or deletes it is treated as hostile.
+"""
+
+
+def honeypot_path(folder):
+    return normalize_path(os.path.join(folder, HONEYPOT_FILE))
+
+
+def create_honeypot(folder=None, sink=None):
+    path = honeypot_path(folder or os.getcwd())
+    if os.path.exists(path):
+        emit(sink, INFO, f"Honeypot already deployed: {path}", "honeypot", path)
+        return path
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(HONEYPOT_CONTENT)
+    except OSError as e:
+        emit(sink, WARNING, f"Honeypot creation failed: {e}", "honeypot", path)
+        return None
+    emit(sink, SUCCESS, f"Honeypot deployed: {path}", "honeypot", path)
+    return path
+
+
+# ---------------------------------------------------------------------------
+# Real-time file monitoring
+# ---------------------------------------------------------------------------
 
 class RealTimeMonitor(FileSystemEventHandler):
-    def __init__(self, baseline_hashes, alert_queue=None):
+    def __init__(self, baseline_hashes, alert_queue=None, mass_threshold=5, mass_window=10, cooldown=15, root=None):
         super().__init__()
         self.baseline_hashes = baseline_hashes
-        self.change_times = []
-        self.alert_queue = alert_queue
+        self.root = root
+        self.sink = alert_queue
+        self.mass_threshold = mass_threshold
+        self.mass_window = mass_window
+        self.cooldown = cooldown
+        self.change_times = deque()
+        self._last_mass_alert = 0.0
+
+    def _skip(self, path):
+        return is_app_file(path) or should_ignore(path, self.root)
+
+    def _honeypot_alert(self, action, path):
+        emit(self.sink, CRITICAL, f"Honeypot {action}! A process touched the decoy file: {path}", "honeypot", path)
+        self._record_change()
 
     def on_created(self, event):
-        if not event.is_directory:
-            file_path = normalize_path(event.src_path)
-            # Exclude system files and global exclusions
-            if os.path.basename(file_path) in [HASH_DB_FILE, HONEYPOT_FILE, LOG_FILE] or should_ignore(file_path):
-                return
-            log_suspicious_activity(f"New file created: {event.src_path}")
-            notify_user(f"New file detected: {os.path.basename(event.src_path)}")
-            if self.alert_queue:
-                self.alert_queue.put(f"New file created: {os.path.basename(event.src_path)}")
+        if event.is_directory:
+            return
+        path = normalize_path(event.src_path)
+        if is_honeypot(path) or self._skip(path):
+            return
+        if has_ransomware_extension(path):
+            emit(self.sink, CRITICAL, f"File with ransomware extension created: {path}", "file", path)
+        else:
+            emit(self.sink, INFO, f"New file created: {path}", "file", path)
+        file_hash = calculate_hash(path)
+        if file_hash:
+            self.baseline_hashes[path] = file_hash
+        self._record_change()
 
     def on_modified(self, event):
         if event.is_directory:
             return
-        file_path = normalize_path(event.src_path)
-        # Exclude system files and global exclusions
-        if os.path.basename(file_path) in [HASH_DB_FILE, HONEYPOT_FILE, LOG_FILE] or should_ignore(file_path):
+        path = normalize_path(event.src_path)
+        if is_honeypot(path):
+            self._honeypot_alert("modified", path)
             return
-        new_hash = calculate_hash(file_path)
-        old_hash = self.baseline_hashes.get(file_path)
-
+        if self._skip(path):
+            return
+        new_hash = calculate_hash(path)
+        if new_hash is None:
+            return
+        old_hash = self.baseline_hashes.get(path)
+        self.baseline_hashes[path] = new_hash
         if old_hash and new_hash != old_hash:
-            print(f"⚠️ File changed: {file_path}")
-            self.baseline_hashes[file_path] = new_hash
-            log_suspicious_activity(f"Modified: {file_path}")
-            notify_user(f"File modified: {os.path.basename(file_path)}")
-            self.change_times.append(time.time())
-            self.detect_mass_changes()
-            if self.alert_queue:
-                self.alert_queue.put(f"File modified: {os.path.basename(file_path)}")
+            emit(self.sink, WARNING, f"File modified: {path}", "file", path)
+            self._record_change()
 
     def on_deleted(self, event):
-        if not event.is_directory:
-            file_path = normalize_path(event.src_path)
-            # Exclude ignored files
-            if os.path.basename(file_path) in [HASH_DB_FILE, HONEYPOT_FILE, LOG_FILE] or should_ignore(file_path):
-                return
-                
-            print(f"[Deleted] {event.src_path}")
-            log_suspicious_activity(f"Deleted: {event.src_path}")
-            notify_user(f"File deleted: {os.path.basename(event.src_path)}")
-            if self.alert_queue:
-                self.alert_queue.put(f"File deleted: {os.path.basename(event.src_path)}")
+        if event.is_directory:
+            return
+        path = normalize_path(event.src_path)
+        if is_honeypot(path):
+            self._honeypot_alert("deleted", path)
+            return
+        if self._skip(path):
+            return
+        self.baseline_hashes.pop(path, None)
+        emit(self.sink, WARNING, f"File deleted: {path}", "file", path)
+        self._record_change()
 
-    def detect_mass_changes(self):
+    def on_moved(self, event):
+        if event.is_directory:
+            return
+        src = normalize_path(event.src_path)
+        dest = normalize_path(event.dest_path)
+        if is_honeypot(src):
+            self._honeypot_alert("renamed", f"{src} -> {dest}")
+            return
+        if self._skip(src) and self._skip(dest):
+            return
+        if src in self.baseline_hashes:
+            self.baseline_hashes[dest] = self.baseline_hashes.pop(src)
+        if has_ransomware_extension(dest) and not has_ransomware_extension(src):
+            emit(self.sink, CRITICAL, f"File renamed to ransomware extension: {src} -> {dest}", "file", dest)
+        else:
+            emit(self.sink, WARNING, f"File renamed: {src} -> {os.path.basename(dest)}", "file", dest)
+        self._record_change()
+
+    def _record_change(self):
         now = time.time()
-        self.change_times = [t for t in self.change_times if now - t < 10]
-        if len(self.change_times) > 5:
-            alert = "🚨 MASS FILE CHANGES DETECTED! Possible ransomware activity!"
-            print(alert)
-            log_suspicious_activity(alert)
-            notify_user(alert)
-            if self.alert_queue:
-                self.alert_queue.put("Mass file changes detected")
+        self.change_times.append(now)
+        while self.change_times and now - self.change_times[0] > self.mass_window:
+            self.change_times.popleft()
+        if len(self.change_times) > self.mass_threshold and now - self._last_mass_alert > self.cooldown:
+            self._last_mass_alert = now
+            emit(self.sink, CRITICAL,
+                 f"MASS FILE CHANGES DETECTED! {len(self.change_times)} changes in "
+                 f"{self.mass_window}s - possible ransomware activity!", "file")
 
-def start_real_time_monitor(path, alert_queue=None, stop_event=None):
-    try:
-        with open(HASH_DB_FILE, "r") as f:
-            baseline_hashes = json.load(f)
-    except FileNotFoundError:
-        print("❌ Baseline not found. Please run option 1 first.")
-        notify_user("Baseline missing. Please create one first.")
-        if alert_queue:
-            alert_queue.put("❌ Baseline not found. Please create one first.")
+    # Kept for backwards compatibility with the v1 API
+    def detect_mass_changes(self):
+        self._record_change()
+
+
+def start_real_time_monitor(path, alert_queue=None, stop_event=None, db_file=HASH_DB_FILE):
+    """Watch ``path`` until ``stop_event`` is set (or Ctrl+C in the console)."""
+    sink = alert_queue
+    if not os.path.isdir(path):
+        emit(sink, WARNING, f"Cannot monitor missing folder: {path}", "monitor")
         return
 
-    event_handler = RealTimeMonitor(baseline_hashes, alert_queue)
+    baseline = load_baseline(db_file)
+    if baseline is None:
+        emit(sink, WARNING, "No baseline found: modifications to existing files are only "
+                            "detected after a baseline is created.", "monitor")
+        baseline_hashes = {}
+    else:
+        baseline_hashes = dict(baseline["files"])
+
+    event_handler = RealTimeMonitor(baseline_hashes, sink, root=path)
     observer = Observer()
-    observer.schedule(event_handler, path=path, recursive=True)
-    observer.start()
-    message = f"👁️ Real-time monitoring started on: {path}"
-    print(f"\n{message}")
-    notify_user("Real-time monitoring started.")
-    if alert_queue:
-        alert_queue.put(message)
     try:
-        while True:
-            if stop_event and stop_event.is_set():
-                break
-            time.sleep(1)
+        observer.schedule(event_handler, path=path, recursive=True)
+        observer.start()
+    except OSError as e:
+        emit(sink, WARNING, f"Could not start file monitor: {e}", "monitor")
+        return
+
+    emit(sink, SUCCESS, f"Real-time monitoring started on {path}", "monitor")
+    try:
+        while not (stop_event and stop_event.is_set()):
+            time.sleep(0.5)
     except KeyboardInterrupt:
         pass
     finally:
         observer.stop()
         observer.join()
-        if alert_queue:
-            alert_queue.put("🛑 Real-time monitoring stopped")
+        emit(sink, INFO, "Real-time monitoring stopped", "monitor")
 
-def monitor_processes_sustained(threshold=10, window_seconds=30, repeat_limit=3, check_interval=5, alert_queue=None, stop_event=None):
-    message = f"🔎 Monitoring for processes with sustained CPU > {threshold}%..."
-    print(f"\n{message}")
-    if alert_queue:
-        alert_queue.put(message)
+
+# ---------------------------------------------------------------------------
+# Process (CPU) heuristics
+# ---------------------------------------------------------------------------
+
+IGNORED_PROCESSES = {"system idle process", "idle", "system", "registry", "memory compression"}
+
+
+def monitor_processes_sustained(threshold=30, window_seconds=30, repeat_limit=3, check_interval=3,
+                                alert_queue=None, stop_event=None, cooldown=120):
+    """Alert on processes using more than ``threshold`` % of total CPU in
+    ``repeat_limit`` samples within ``window_seconds``.
+
+    CPU usage is normalised by core count, so 100% means every core is busy.
+    """
+    sink = alert_queue
+    emit(sink, SUCCESS, f"Process monitoring started (alert on sustained CPU > {threshold}%)", "process")
+    cpu_count = psutil.cpu_count() or 1
+    own_pid = os.getpid()
     high_cpu_times = defaultdict(deque)
-    last_status_time = 0
-    status_interval = 10
+    last_alert = {}
 
+    # The first cpu_percent() call per process always returns 0; prime them
     for proc in psutil.process_iter():
         try:
             proc.cpu_percent(interval=None)
@@ -265,80 +465,100 @@ def monitor_processes_sustained(threshold=10, window_seconds=30, repeat_limit=3,
 
     try:
         while True:
-            if stop_event and stop_event.is_set():
-                if alert_queue:
-                    alert_queue.put("🛑 CPU monitoring stopped")
-                break
+            # Event.wait returns early (True) as soon as a stop is requested
+            if stop_event:
+                if stop_event.wait(check_interval):
+                    break
+            else:
+                time.sleep(check_interval)
             now = time.time()
-            for proc in psutil.process_iter(['pid', 'name']):
+            alive = set()
+            for proc in psutil.process_iter(["pid", "name"]):
                 try:
-                    cpu = proc.cpu_percent(interval=0.1)
-
-                    pid = proc.pid
-                    name = proc.name()
-                    if cpu > threshold and pid != 0 and name != "System Idle Process":
-                        times = high_cpu_times[pid]
-                        times.append(now)
-                        while times and now - times[0] > window_seconds:
-                            times.popleft()
-                        if len(times) >= repeat_limit:
-                            message = f"🚨 High sustained CPU: {name} (PID: {pid}) - {cpu:.2f}%"
-                            print(message)
-                            log_suspicious_activity(message)
-                            notify_user(message)
-                            if alert_queue:
-                                alert_queue.put(message)
-                            times.clear()
+                    pid = proc.info["pid"]
+                    name = proc.info["name"] or "?"
+                    alive.add(pid)
+                    cpu = proc.cpu_percent(interval=None) / cpu_count
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
-
-            if now - last_status_time > status_interval:
-                status_msg = "⏳ Monitoring... no threats yet."
-                print(status_msg)
-                if alert_queue:
-                    alert_queue.put(status_msg)
-                last_status_time = now
-
-            time.sleep(check_interval)
-
+                if pid in (0, own_pid) or name.lower() in IGNORED_PROCESSES or cpu <= threshold:
+                    continue
+                times = high_cpu_times[pid]
+                times.append(now)
+                while times and now - times[0] > window_seconds:
+                    times.popleft()
+                if len(times) >= repeat_limit and now - last_alert.get(pid, 0) > cooldown:
+                    last_alert[pid] = now
+                    times.clear()
+                    emit(sink, WARNING, f"High sustained CPU: {name} (PID {pid}) at {cpu:.1f}%", "process")
+            for pid in list(high_cpu_times):
+                if pid not in alive:
+                    del high_cpu_times[pid]
+                    last_alert.pop(pid, None)
     except KeyboardInterrupt:
-        print("\n⛔ Monitoring stopped by user.")
+        pass
+    emit(sink, INFO, "Process monitoring stopped", "process")
 
-def main_menu(alert_queue=None):
+
+# ---------------------------------------------------------------------------
+# Entry points
+# ---------------------------------------------------------------------------
+
+def launch_gui():
+    from gui.main_gui import run_gui
+    run_gui()
+
+
+def main_menu():
     folder_to_monitor = os.getcwd()
 
     while True:
-        print("\n===== 🔐 SecureVault: Ransomware Detection System =====")
+        print(f"\n===== {APP_NAME} v{APP_VERSION}: Ransomware Detection System =====")
+        print(f"Folder: {folder_to_monitor}")
         print("1. Create Baseline Hashes")
         print("2. Check for Changes (Manual Scan)")
         print("3. Create Honeypot File")
         print("4. Start Real-Time File Monitoring")
         print("5. Start Suspicious Process Monitoring (CPU)")
         print("6. Launch GUI Dashboard")
+        print("7. Change Folder")
         print("0. Exit")
-        choice = input("Choose an option: ").strip()
+        try:
+            choice = input("Choose an option: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
 
         if choice == "1":
             create_baseline(folder_to_monitor)
         elif choice == "2":
-            check_for_changes()
+            check_for_changes(folder_to_monitor)
         elif choice == "3":
-            create_honeypot()
+            create_honeypot(folder_to_monitor)
         elif choice == "4":
             print("Starting real-time monitor (press Ctrl+C to stop)...")
-            start_real_time_monitor(folder_to_monitor, alert_queue)
+            start_real_time_monitor(folder_to_monitor)
         elif choice == "5":
             print("Starting suspicious process monitor (press Ctrl+C to stop)...")
-        elif choice =="6":
+            monitor_processes_sustained()
+        elif choice == "6":
             print("Launching GUI Dashboard...")
             launch_gui()
-            monitor_processes_sustained(alert_queue=alert_queue)
+        elif choice == "7":
+            new_folder = input("Folder to protect: ").strip().strip('"')
+            if os.path.isdir(new_folder):
+                folder_to_monitor = os.path.abspath(new_folder)
+            else:
+                print("Folder not found.")
         elif choice == "0":
-            print("Exiting SecureVault.")
+            print(f"Exiting {APP_NAME}.")
             break
         else:
             print("Invalid option.")
 
+
 if __name__ == "__main__":
-    # For standalone run, no queue passed
-    main_menu()
+    if "--gui" in sys.argv[1:]:
+        launch_gui()
+    else:
+        main_menu()

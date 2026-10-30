@@ -44,3 +44,6 @@ honeypot_fake_sensitive.txt
 Evidence_Report_*.html
 *.tmp
 *.log
+SecureVault_Report_*.html
+hash_db.json.part
+.pytest_cache/

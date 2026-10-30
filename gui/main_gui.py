@@ -1,1512 +1,899 @@
-import sys
+# gui/main_gui.py
+"""SecureVault desktop dashboard (PyQt6)."""
 import os
-import threading
-import queue
-from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QLabel, QPushButton,
-    QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QFrame,
-    QLineEdit, QFileDialog, QGridLayout, QGraphicsOpacityEffect,
-    QProgressBar, QSystemTrayIcon, QMenu, QStyle
-)
-from PyQt6.QtGui import QFont, QTextCursor, QMouseEvent, QPainter, QPainterPath, QColor, QLinearGradient, QPen, QBrush, QAction
-from PyQt6.QtCore import Qt, QPropertyAnimation, QRect, QEasingCurve, QPoint, QTimer, QSequentialAnimationGroup, QParallelAnimationGroup, pyqtProperty
-import psutil
-from collections import deque
-import random
-import math
-import winsound
-import threading
+import sys
+import html
+import time
 import datetime
+import threading
+import itertools
 
-# Import backend functions
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from main import (
-    create_baseline, check_for_changes,
-    create_honeypot, start_real_time_monitor,
-    monitor_processes_sustained
+from PyQt6.QtCore import Qt, QObject, QTimer, QUrl, pyqtSignal
+from PyQt6.QtGui import QAction, QDesktopServices, QFontMetrics, QColor, QFont
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout,
+    QHBoxLayout, QGridLayout, QLineEdit, QComboBox, QTableWidget,
+    QTableWidgetItem, QHeaderView, QAbstractItemView, QFileDialog, QDialog,
+    QPlainTextEdit, QSystemTrayIcon, QMenu, QStatusBar, QSizePolicy,
 )
 
-class LogViewerWindow(QWidget):
-    def __init__(self, log_path):
-        super().__init__()
-        self.setWindowTitle("📄 SecureVault Logs")
-        self.setGeometry(400, 200, 700, 500)
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.start_pos = None
+# Allow running this file directly as well as via main.py
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from main import (  # noqa: E402
+    APP_NAME, APP_VERSION, APP_DIR, LOG_FILE, HASH_DB_FILE,
+    create_baseline, check_for_changes, create_honeypot, honeypot_path,
+    start_real_time_monitor, monitor_processes_sustained, load_baseline,
+    normalize_path, emit, INFO, SUCCESS, WARNING, CRITICAL,
+)
+from gui import theme  # noqa: E402
+from gui.widgets import (  # noqa: E402
+    Card, StatCard, ToggleSwitch, StatusPill, SystemLoadGraph, ToastManager,
+    ShieldLogo, SoundManager, make_app_icon,
+)
+from gui.splash import SplashScreen  # noqa: E402
+
+MAX_FEED_ROWS = 2000
+
+
+class Bridge(QObject):
+    """Carries results from worker threads back to the GUI thread."""
+    event = pyqtSignal(object)
+    task_done = pyqtSignal(str, int, object)
+    task_failed = pyqtSignal(str, int, str)
+
+
+class ElidedLabel(QLabel):
+    """A label that shortens long text with an ellipsis in the middle."""
+    def __init__(self, text="", parent=None):
+        super().__init__(parent)
+        self._full = text
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.setText(text)
+
+    def setText(self, text):
+        self._full = text
+        self.setToolTip(text)
+        self._refresh()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._refresh()
+
+    def _refresh(self):
+        elided = QFontMetrics(self.font()).elidedText(self._full, Qt.TextElideMode.ElideMiddle, max(40, self.width()))
+        super().setText(elided)
+
+
+class ActionTile(QPushButton):
+    """Large button with an icon badge, title and description."""
+    def __init__(self, glyph, title, description, primary=False, parent=None):
+        super().__init__(parent)
+        self.setProperty("variant", "primary" if primary else "action")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMinimumHeight(62)
+        self._title_text = title
+        self._desc_text = description
+        self._primary = primary
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(12)
+        self.glyph = QLabel(glyph)
+        self.glyph.setFixedSize(34, 34)
+        self.glyph.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge_bg = "rgba(4, 19, 31, 0.18)" if primary else theme.SURFACE_3
+        self.glyph.setStyleSheet(f"background: {badge_bg}; border-radius: 8px; font-size: 16px;")
+        text = QVBoxLayout()
+        text.setSpacing(1)
+        fg = "#04131f" if primary else theme.TEXT
+        sub = "rgba(4, 19, 31, 0.7)" if primary else theme.MUTED
+        self.title = QLabel(title)
+        self.title.setStyleSheet(f"color: {fg}; font-weight: 700; font-size: 13px;")
+        self.desc = QLabel(description)
+        self.desc.setStyleSheet(f"color: {sub}; font-size: 11px; font-weight: 400;")
+        text.addWidget(self.title)
+        text.addWidget(self.desc)
+        layout.addWidget(self.glyph)
+        layout.addLayout(text, 1)
+        for w in (self.glyph, self.title, self.desc):
+            w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+    def set_busy(self, busy, text="Working..."):
+        self.setEnabled(not busy)
+        self.setCursor(Qt.CursorShape.BusyCursor if busy else Qt.CursorShape.PointingHandCursor)
+        self.title.setText(text if busy else self._title_text)
+
+
+class ToggleRow(QWidget):
+    def __init__(self, title, description, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 4, 0, 4)
+        layout.setSpacing(12)
+        text = QVBoxLayout()
+        text.setSpacing(2)
+        t = QLabel(title)
+        t.setStyleSheet("font-weight: 600;")
+        self.state = QLabel(description)
+        self.state.setObjectName("Muted")
+        self.state.setStyleSheet("font-size: 11px;")
+        self.state.setWordWrap(True)
+        text.addWidget(t)
+        text.addWidget(self.state)
+        self.switch = ToggleSwitch()
+        layout.addLayout(text, 1)
+        layout.addWidget(self.switch, 0, Qt.AlignmentFlag.AlignVCenter)
+
+
+class LogViewerWindow(QDialog):
+    MAX_LINES = 5000
+
+    def __init__(self, log_path, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"{APP_NAME} - Activity Log")
+        self.resize(820, 560)
         self.log_path = log_path
-        self.init_ui()
-        self.fade_in()
+        self.full_log = ""
 
-    def fade_in(self):
-        """Fade in animation for window"""
-        self.opacity_effect = QGraphicsOpacityEffect(self)
-        self.setGraphicsEffect(self.opacity_effect)
-        self.opacity_anim = QPropertyAnimation(self.opacity_effect, b"opacity")
-        self.opacity_anim.setDuration(400)
-        self.opacity_anim.setStartValue(0)
-        self.opacity_anim.setEndValue(1)
-        self.opacity_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self.opacity_anim.start()
-
-    def init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Main container with gradient
-        container = QFrame()
-        container.setStyleSheet("""
-            QFrame {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #1a1a2e, stop:1 #16213e);
-                border: 2px solid #00ADB5;
-                border-radius: 15px;
-            }
-        """)
-        
-        inner_layout = QVBoxLayout(container)
-        inner_layout.setContentsMargins(20, 20, 20, 20)
-        inner_layout.setSpacing(15)
-        
-        # Title bar
-        title_bar = QFrame()
-        title_bar.setStyleSheet("background: transparent; border: none;")
-        title_layout = QHBoxLayout(title_bar)
-        title_layout.setContentsMargins(0, 0, 0, 0)
-        
-        title_label = QLabel("📄 Activity Logs")
-        title_label.setStyleSheet("""
-            color: white;
-            font-size: 18px;
-            font-weight: bold;
-            background: transparent;
-        """)
-        
-        close_btn = QPushButton("✕")
-        close_btn.setFixedSize(30, 30)
-        close_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #e74c3c;
-                color: white;
-                border: none;
-                border-radius: 15px;
-                font-size: 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #c0392b;
-            }
-        """)
-        close_btn.clicked.connect(self.close)
-        
-        title_layout.addWidget(title_label)
-        title_layout.addStretch()
-        title_layout.addWidget(close_btn)
-        
-        # Search bar
-        self.search_bar = QLineEdit()
-        self.search_bar.setPlaceholderText("🔍 Search logs...")
-        self.search_bar.setStyleSheet("""
-            QLineEdit {
-                padding: 12px;
-                border: 2px solid #00ADB5;
-                border-radius: 10px;
-                background-color: rgba(255, 255, 255, 0.1);
-                color: white;
-                font-size: 14px;
-            }
-            QLineEdit:focus {
-                border: 2px solid #02cbd2;
-                background-color: rgba(255, 255, 255, 0.15);
-            }
-        """)
-        self.search_bar.textChanged.connect(self.search_logs)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
 
-        # Log text area
-        self.log_text = QTextEdit()
+        header = QHBoxLayout()
+        title = QLabel("Activity log")
+        title.setObjectName("CardTitle")
+        path = ElidedLabel(log_path)
+        path.setObjectName("Muted")
+        header.addWidget(title)
+        header.addSpacing(10)
+        header.addWidget(path, 1)
+        layout.addLayout(header)
+
+        self.search_bar = QLineEdit()
+        self.search_bar.setPlaceholderText("Filter lines...")
+        self.search_bar.setClearButtonEnabled(True)
+        self.search_bar.textChanged.connect(self.search_logs)
+        layout.addWidget(self.search_bar)
+
+        self.log_text = QPlainTextEdit()
         self.log_text.setReadOnly(True)
-        self.log_text.setStyleSheet("""
-            QTextEdit {
-                background-color: rgba(0, 0, 0, 0.3);
-                padding: 15px;
-                font-size: 13px;
-                font-family: 'Consolas', 'Courier New', monospace;
-                border: 1px solid #00ADB5;
-                border-radius: 10px;
-                color: #e0e0e0;
-            }
-        """)
+        self.log_text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        layout.addWidget(self.log_text, 1)
+
+        buttons = QHBoxLayout()
+        self.summary = QLabel()
+        self.summary.setObjectName("Muted")
+        refresh = QPushButton("Refresh")
+        refresh.clicked.connect(self.load_logs)
+        folder = QPushButton("Open folder")
+        folder.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.dirname(log_path))))
+        save = QPushButton("Save copy...")
+        save.setProperty("variant", "primary")
+        save.clicked.connect(self.save_logs)
+        buttons.addWidget(self.summary, 1)
+        buttons.addWidget(refresh)
+        buttons.addWidget(folder)
+        buttons.addWidget(save)
+        layout.addLayout(buttons)
+
         self.load_logs()
 
-        # Save button
-        save_button = QPushButton("💾 Save Logs")
-        save_button.setStyleSheet("""
-            QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #00ADB5, stop:1 #00d4ff);
-                color: white;
-                border: none;
-                border-radius: 10px;
-                padding: 12px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #02cbd2, stop:1 #02e8ff);
-            }
-        """)
-        save_button.clicked.connect(self.save_logs)
-
-        inner_layout.addWidget(title_bar)
-        inner_layout.addWidget(self.search_bar)
-        inner_layout.addWidget(self.log_text)
-        inner_layout.addWidget(save_button)
-        
-        layout.addWidget(container)
-
     def load_logs(self):
-        if os.path.exists(self.log_path):
-            with open(self.log_path, "r", encoding="utf-8") as f:
-                self.full_log = f.read()
-                self.log_text.setPlainText(self.full_log)
+        try:
+            with open(self.log_path, "r", encoding="utf-8", errors="replace") as f:
+                lines = f.read().splitlines()
+        except OSError:
+            lines = []
+        total = len(lines)
+        self.full_log = "\n".join(lines[-self.MAX_LINES:])
+        if total > self.MAX_LINES:
+            self.summary.setText(f"Showing last {self.MAX_LINES:,} of {total:,} entries")
         else:
-            self.full_log = ""
-            self.log_text.setPlainText("No logs found.")
+            self.summary.setText(f"{total:,} entries" if total else "No activity logged yet")
+        self.search_logs(self.search_bar.text())
 
     def search_logs(self, text):
         if text:
-            filtered = "\n".join(
-                line for line in self.full_log.splitlines()
-                if text.lower() in line.lower()
-            )
-            self.log_text.setPlainText(filtered)
+            needle = text.lower()
+            self.log_text.setPlainText("\n".join(l for l in self.full_log.splitlines() if needle in l.lower()))
         else:
             self.log_text.setPlainText(self.full_log)
+        self.log_text.moveCursor(self.log_text.textCursor().MoveOperation.End)
 
     def save_logs(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Save Logs", "securevault_logs.txt", "Text Files (*.txt)")
+        path, _ = QFileDialog.getSaveFileName(self, "Save Log Copy", "securevault_logs.txt", "Text Files (*.txt)")
         if path:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(self.full_log)
-
-    # Drag to move
-    def mousePressEvent(self, event: QMouseEvent):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.start_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-
-    def mouseMoveEvent(self, event: QMouseEvent):
-        if self.start_pos and event.buttons() == Qt.MouseButton.LeftButton:
-            self.move(event.globalPosition().toPoint() - self.start_pos)
-
-    def mouseReleaseEvent(self, event: QMouseEvent):
-        self.start_pos = None
-
-
-class NotificationBanner(QFrame):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedHeight(0)
-        self.setStyleSheet("""
-            QFrame {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #00ADB5, stop:1 #00d4ff);
-                border: none;
-                border-bottom: 2px solid rgba(255, 255, 255, 0.3);
-            }
-        """)
-        
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(20, 10, 20, 10)
-        
-        self.icon_label = QLabel("ℹ️")
-        self.icon_label.setStyleSheet("""
-            font-size: 20px;
-            background: transparent;
-            border: none;
-        """)
-        
-        self.message_label = QLabel("")
-        self.message_label.setStyleSheet("""
-            color: white;
-            font-size: 14px;
-            font-weight: bold;
-            background: transparent;
-            border: none;
-        """)
-        
-        close_btn = QPushButton("✕")
-        close_btn.setFixedSize(25, 25)
-        close_btn.setStyleSheet("""
-            QPushButton {
-                background-color: rgba(255, 255, 255, 0.2);
-                color: white;
-                border: none;
-                border-radius: 12px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: rgba(255, 255, 255, 0.4);
-            }
-        """)
-        close_btn.clicked.connect(self.hide_banner)
-        
-        layout.addWidget(self.icon_label)
-        layout.addWidget(self.message_label, 1)
-        layout.addWidget(close_btn)
-        
-        self.hide_timer = QTimer()
-        self.hide_timer.timeout.connect(self.hide_banner)
-        
-    def show_notification(self, message, notification_type="info"):
-        """Show notification with animation"""
-        # Set icon and color based on type
-        type_config = {
-            "critical": {"icon": "🚨", "color": "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #e74c3c, stop:1 #c0392b)"},
-            "warning": {"icon": "⚠️", "color": "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #f39c12, stop:1 #e67e22)"},
-            "success": {"icon": "✅", "color": "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #27ae60, stop:1 #229954)"},
-            "info": {"icon": "ℹ️", "color": "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #00ADB5, stop:1 #00d4ff)"}
-        }
-        
-        config = type_config.get(notification_type, type_config["info"])
-        self.icon_label.setText(config["icon"])
-        self.message_label.setText(message)
-        self.setStyleSheet(f"""
-            QFrame {{
-                background: {config["color"]};
-                border: none;
-                border-bottom: 2px solid rgba(255, 255, 255, 0.3);
-            }}
-        """)
-        
-        # Animate slide down
-        self.animation = QPropertyAnimation(self, b"maximumHeight")
-        self.animation.setDuration(400)
-        self.animation.setStartValue(0)
-        self.animation.setEndValue(60)
-        self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self.animation.start()
-        
-        # Auto-hide after 5 seconds
-        self.hide_timer.stop()
-        self.hide_timer.start(5000)
-        
-    def hide_banner(self):
-        """Hide notification with animation"""
-        self.hide_timer.stop()
-        self.animation = QPropertyAnimation(self, b"maximumHeight")
-        self.animation.setDuration(300)
-        self.animation.setStartValue(60)
-        self.animation.setEndValue(0)
-        self.animation.setEasingCurve(QEasingCurve.Type.InCubic)
-        self.animation.start()
-
-
-class AnimatedButton(QFrame):
-    """Custom animated button with hover effects"""
-    def __init__(self, label, description, callback, parent=None):
-        super().__init__(parent)
-        self.callback = callback
-        self.original_label = label
-        self.original_desc = description
-        self.is_loading = False
-        self.setFixedHeight(90)  # Reduced height
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        
-        # Initial style
-        self.default_style = """
-            QFrame {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(0, 173, 181, 0.2), stop:1 rgba(0, 212, 255, 0.1));
-                border: 2px solid rgba(0, 173, 181, 0.5);
-                border-radius: 12px;
-            }
-        """
-        
-        self.hover_style = """
-            QFrame {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(0, 173, 181, 0.4), stop:1 rgba(0, 212, 255, 0.3));
-                border: 2px solid #00FFF5;
-                border-radius: 12px;
-            }
-        """
-        
-        self.setStyleSheet(self.default_style)
-        
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)  # Reduced padding
-        layout.setSpacing(5)
-        
-        self.label_widget = QLabel(label)
-        self.label_widget.setStyleSheet("""
-            color: white;
-            font-size: 14px;
-            font-weight: bold;
-            background: transparent;
-            border: none;
-        """)
-        self.label_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        self.desc_widget = QLabel(description)
-        self.desc_widget.setStyleSheet("""
-            color: #b0b0b0;
-            font-size: 11px;
-            background: transparent;
-            border: none;
-        """)
-        self.desc_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        layout.addWidget(self.label_widget)
-        layout.addWidget(self.desc_widget)
-        layout.addStretch()
-        
-        # Setup animations
-        self.scale_anim = QPropertyAnimation(self, b"geometry")
-        self.scale_anim.setDuration(200)
-        self.scale_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        
-    def enterEvent(self, event):
-        """Hover enter - scale up"""
-        if self.is_loading:
-            return
-        self.setStyleSheet(self.hover_style)
-        current_geo = self.geometry()
-        # Slight scale effect
-        new_geo = QRect(
-            current_geo.x() - 2,
-            current_geo.y() - 2,
-            current_geo.width() + 4,
-            current_geo.height() + 4
-        )
-        self.scale_anim.setStartValue(current_geo)
-        self.scale_anim.setEndValue(new_geo)
-        self.scale_anim.start()
-        
-    def leaveEvent(self, event):
-        """Hover leave - scale down"""
-        if self.is_loading:
-            return
-        self.setStyleSheet(self.default_style)
-        current_geo = self.geometry()
-        new_geo = QRect(
-            current_geo.x() + 2,
-            current_geo.y() + 2,
-            current_geo.width() - 4,
-            current_geo.height() - 4
-        )
-        self.scale_anim.setStartValue(current_geo)
-        self.scale_anim.setEndValue(new_geo)
-        self.scale_anim.start()
-        
-    def mousePressEvent(self, event):
-        """Click animation"""
-        if self.is_loading:
-            return
-            
-        if event.button() == Qt.MouseButton.LeftButton:
-            # Quick press animation
-            self.setStyleSheet("""
-                QFrame {
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                        stop:0 rgba(0, 173, 181, 0.6), stop:1 rgba(0, 212, 255, 0.5));
-                    border: 2px solid #02e8ff;
-                }
-            """)
-            QTimer.singleShot(100, lambda: self.setStyleSheet(self.hover_style))
-            SoundManager.play_click()
-            self.callback()
-
-    def update_label(self, label, description=None):
-        """Update button text dynamically"""
-        self.label_widget.setText(label)
-        if description:
-            self.desc_widget.setText(description)
-
-    def set_loading(self, is_loading):
-        """Set loading state with pulsing animation"""
-        self.is_loading = is_loading
-        if is_loading:
-            self.setCursor(Qt.CursorShape.WaitCursor)
-            self.label_widget.setText("⏳ Processing...")
-            self.desc_widget.setText("Please wait")
-            
-            # Pulsing animation style
-            self.pulse_timer = QTimer(self)
-            self.pulse_state = 0
-            self.pulse_timer.timeout.connect(self._pulse_loading)
-            self.pulse_timer.start(100)
-        else:
-            if hasattr(self, 'pulse_timer'):
-                self.pulse_timer.stop()
-            self.setCursor(Qt.CursorShape.PointingHandCursor)
-            self.label_widget.setText(self.original_label)
-            self.desc_widget.setText(self.original_desc)
-            self.setStyleSheet(self.default_style)
-            
-            # Success flash
-            self.setStyleSheet("""
-                QFrame {
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                        stop:0 rgba(46, 204, 113, 0.3), stop:1 rgba(39, 174, 96, 0.2));
-                    border: 2px solid #2ecc71;
-                    border-radius: 15px;
-                }
-            """)
-            QTimer.singleShot(500, lambda: self.setStyleSheet(self.default_style))
-
-    def _pulse_loading(self):
-        """Internal pulse animation step"""
-        self.pulse_state = (self.pulse_state + 1) % 20
-        alpha = 0.2 + 0.3 * abs(10 - self.pulse_state) / 10
-        self.setStyleSheet(f"""
-            QFrame {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(241, 196, 15, {alpha}), stop:1 rgba(243, 156, 18, {alpha/2}));
-                border: 2px solid rgba(241, 196, 15, 0.8);
-                border-radius: 15px;
-            }}
-        """)
-
-
-class NetworkBackground(QWidget):
-    """Animated background with floating particles and connections"""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.particles = []
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.update_particles)
-        self.timer.start(33)  # ~30 FPS
-        
-        # Initialize particles
-        self.num_particles = 40
-        self.connection_distance = 120
-        
-    def resizeEvent(self, event):
-        # Re-initialize particles on resize to spread them out
-        if not self.particles:
-            for _ in range(self.num_particles):
-                self.particles.append({
-                    'x': random.randint(0, self.width()),
-                    'y': random.randint(0, self.height()),
-                    'vx': random.uniform(-0.8, 0.8),
-                    'vy': random.uniform(-0.8, 0.8),
-                    'size': random.randint(2, 4)
-                })
-        super().resizeEvent(event)
-
-    def update_particles(self):
-        for p in self.particles:
-            p['x'] += p['vx']
-            p['y'] += p['vy']
-            
-            # Bounce off edges
-            if p['x'] < 0 or p['x'] > self.width():
-                p['vx'] *= -1
-            if p['y'] < 0 or p['y'] > self.height():
-                p['vy'] *= -1
-        self.update()
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        # Draw gradient background
-        gradient = QLinearGradient(0, 0, self.width(), self.height())
-        gradient.setColorAt(0, QColor("#0f0c29"))
-        gradient.setColorAt(0.5, QColor("#302b63"))
-        gradient.setColorAt(1, QColor("#24243e"))
-        painter.fillRect(self.rect(), gradient)
-        
-        # Draw connections
-        painter.setPen(Qt.PenStyle.NoPen)
-        for i, p1 in enumerate(self.particles):
-            # Draw particle
-            painter.setBrush(QColor(0, 173, 181, 150))
-            painter.drawEllipse(QPoint(int(p1['x']), int(p1['y'])), p1['size'], p1['size'])
-            
-            # Draw lines
-            for j in range(i + 1, len(self.particles)):
-                p2 = self.particles[j]
-                dx = p1['x'] - p2['x']
-                dy = p1['y'] - p2['y']
-                dist = math.sqrt(dx*dx + dy*dy)
-                
-                if dist < self.connection_distance:
-                    opacity = int((1 - dist / self.connection_distance) * 100)
-                    painter.setPen(QPen(QColor(0, 173, 181, opacity), 1))
-                    painter.drawLine(int(p1['x']), int(p1['y']), int(p2['x']), int(p2['y']))
-
-
-class SoundManager:
-    """Synthesized sound effects using Windows Beep"""
-    @staticmethod
-    def play_click():
-        threading.Thread(target=winsound.Beep, args=(1200, 30), daemon=True).start()
-
-    @staticmethod
-    def play_success():
-        def _chime():
-            winsound.Beep(1000, 100)
-            winsound.Beep(1500, 100)
-            winsound.Beep(2000, 200)
-        threading.Thread(target=_chime, daemon=True).start()
-
-    @staticmethod
-    def play_alert():
-        def _siren():
-            for _ in range(3):
-                winsound.Beep(800, 100)
-                winsound.Beep(1200, 100)
-        threading.Thread(target=_siren, daemon=True).start()
-
-
-class SoundManager:
-    """Synthesized sound effects using Windows Beep"""
-    @staticmethod
-    def play_click():
-        threading.Thread(target=winsound.Beep, args=(1200, 30), daemon=True).start()
-
-    @staticmethod
-    def play_success():
-        def _chime():
-            winsound.Beep(1000, 100)
-            winsound.Beep(1500, 100)
-            winsound.Beep(2000, 200)
-        threading.Thread(target=_chime, daemon=True).start()
-
-    @staticmethod
-    def play_alert():
-        def _siren():
-            for _ in range(3):
-                winsound.Beep(800, 100)
-                winsound.Beep(1200, 100)
-        threading.Thread(target=_siren, daemon=True).start()
-
-
-class CPUGraphWidget(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedHeight(150)
-        self.data = deque([0] * 60, maxlen=60)  # Store last 60 data points
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.update_data)
-        self.timer.start(500)  # Update every 500ms
-        
-        self.setMouseTracking(True)  # Enable hover tracking
-        self.mouse_pos = None
-        
-        self.setStyleSheet("background: transparent;")
-
-    def update_data(self):
-        cpu_percent = psutil.cpu_percent()
-        self.data.append(cpu_percent)
-        self.update()  # Trigger repaint
-
-    def mouseMoveEvent(self, event):
-        self.mouse_pos = event.pos()
-        self.update()
-
-    def leaveEvent(self, event):
-        self.mouse_pos = None
-        self.update()
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        width = self.width()
-        height = self.height()
-        
-        # Draw background
-        painter.fillRect(0, 0, width, height, QColor(0, 0, 0, 100))
-        
-        # Draw grid
-        painter.setPen(QPen(QColor(255, 255, 255, 30), 1, Qt.PenStyle.DotLine))
-        for i in range(0, height, 30):
-            painter.drawLine(0, i, width, i)
-        for i in range(0, width, 30):
-            painter.drawLine(i, 0, i, height)
-            
-        if not self.data:
-            return
-
-        # Determine color based on load
-        current_val = self.data[-1]
-        if current_val > 80:
-            main_color = QColor(231, 76, 60)  # Red
-        elif current_val > 50:
-            main_color = QColor(243, 156, 18)  # Orange
-        else:
-            main_color = QColor(0, 255, 234)  # Cyan
-
-        # Create path for the graph
-        path = QPainterPath()
-        x_step = width / (len(self.data) - 1) if len(self.data) > 1 else width
-        
-        # Start point
-        path.moveTo(0, height - (self.data[0] / 100 * height))
-        
-        points = []
-        for i, value in enumerate(self.data):
-            x = i * x_step
-            y = height - (value / 100 * height)
-            path.lineTo(x, y)
-            points.append((x, y, value))
-            
-        # Draw gradient under the line
-        gradient_path = QPainterPath(path)
-        gradient_path.lineTo(width, height)
-        gradient_path.lineTo(0, height)
-        gradient_path.closeSubpath()
-        
-        gradient = QLinearGradient(0, 0, 0, height)
-        gradient.setColorAt(0, QColor(main_color.red(), main_color.green(), main_color.blue(), 150))
-        gradient.setColorAt(1, QColor(main_color.red(), main_color.green(), main_color.blue(), 10))
-        painter.fillPath(gradient_path, QBrush(gradient))
-        
-        # Draw the line itself
-        painter.setPen(QPen(main_color, 2))
-        painter.drawPath(path)
-        
-        # Draw glowing dot at end
-        last_x, last_y, _ = points[-1]
-        painter.setBrush(main_color)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(QPoint(int(last_x), int(last_y)), 4, 4)
-        
-        # Hover effect
-        if self.mouse_pos:
-            mx = self.mouse_pos.x()
-            # Find closest point
-            closest = min(points, key=lambda p: abs(p[0] - mx))
-            cx, cy, cval = closest
-            
-            # Draw vertical line
-            painter.setPen(QPen(QColor(255, 255, 255, 100), 1, Qt.PenStyle.DashLine))
-            painter.drawLine(int(cx), 0, int(cx), height)
-            
-            # Draw value bubble
-            painter.setBrush(QColor(0, 0, 0, 200))
-            painter.setPen(main_color)
-            rect = QRect(int(cx) - 25, int(cy) - 25, 50, 20)
-            painter.drawRoundedRect(rect, 5, 5)
-            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, f"{int(cval)}%")
-        
-        # Draw current value text (top right)
-        painter.setPen(QColor(255, 255, 255))
-        painter.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-        painter.drawText(width - 80, 20, f"CPU: {current_val}%")
 
 
 class SecureVaultGUI(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("🔐 SecureVault - Ransomware Detection System")
-        self.setGeometry(100, 80, 1300, 700)  # Wider window for side-by-side layout
-        self.folder_to_monitor = os.path.expanduser("~")  # Default to User Home
-        self.alert_queue = queue.Queue()
-        
-        # Monitoring state
-        self.file_monitor_active = False
-        self.cpu_monitor_active = False
-        self.file_stop_event = threading.Event()
-        self.cpu_stop_event = threading.Event()
-        
-        # Fade in effect for main window
-        self.setWindowOpacity(0)
-        
+        self.setWindowTitle(f"{APP_NAME} - Ransomware Detection & Prevention")
+        self.setWindowIcon(make_app_icon())
+        self.resize(1320, 840)
+        self.setMinimumSize(1080, 700)
+
+        self.folder_to_monitor = normalize_path(os.path.expanduser("~"))
+        self.events = []
+        self.counts = {INFO: 0, SUCCESS: 0, WARNING: 0, CRITICAL: 0}
+        self.threat_active = False
+        self.baseline_meta = None
+        self.last_scan = None
+        self._last_toast = 0.0
+        self._last_beep = 0.0
+        self._tray_hint_shown = False
+        self._quitting = False
+        self._tokens = itertools.count(1)
+        self._running = {}       # task key -> token of the run currently owning it
+        self._stop_events = {}   # task key -> threading.Event for long-running monitors
+
+        self.bridge = Bridge()
+        self.bridge.event.connect(self.on_event)
+        self.bridge.task_done.connect(self.on_task_done)
+        self.bridge.task_failed.connect(self.on_task_failed)
+
         self.init_ui()
-        
-        # Start animations
-        self.fade_in_animation()
-        self.animate_background()
-        QTimer.singleShot(100, self.animate_buttons_entrance)
+        self.setup_tray_icon()
+        self.toasts = ToastManager(self.centralWidget())
 
-    def animate_background(self):
-        """Dynamic background animation"""
-        self.bg_timer = QTimer()
-        self.bg_angle = 0
-        
-        def update_bg():
-            self.bg_angle = (self.bg_angle + 1) % 360
-            # Calculate colors based on angle for a subtle shift
-            # We'll just shift the gradient stops slightly or rotate the gradient
-            # For simplicity and performance, let's rotate the gradient vector
-            
-            # Actually, let's just shift the colors slightly
-            # Cycle between blue-ish and purple-ish themes
-            
-            # Simple implementation: Update the stylesheet of the central widget
-            # Note: Updating stylesheet frequently can be expensive. 
-            # Let's do it less frequently or use a more optimized approach.
-            # For now, let's just stick to the static gradient as frequent stylesheet updates might cause flicker.
-            # Instead, let's animate the CPU graph which provides enough 'liveness'.
-            pass
-            
-        # self.bg_timer.timeout.connect(update_bg)
-        # self.bg_timer.start(100)
-        pass
+        self.refresh_protection()
+        self.refresh_honeypot()
+        self.refresh_threats()
+        self.reload_baseline_meta()
+        self.add_event_row(emit(self._silent, INFO, f"{APP_NAME} v{APP_VERSION} ready", log=False))
 
-    def animate_buttons_entrance(self):
-        """Staggered entrance animation for buttons"""
-        self.button_animations = QParallelAnimationGroup()
-        
-        delay = 0
-        for key, btn in self.buttons.items():
-            # Create opacity effect
-            effect = QGraphicsOpacityEffect(btn)
-            btn.setGraphicsEffect(effect)
-            effect.setOpacity(0)
-            
-            # Opacity animation
-            opacity_anim = QPropertyAnimation(effect, b"opacity")
-            opacity_anim.setDuration(600)
-            opacity_anim.setStartValue(0)
-            opacity_anim.setEndValue(1)
-            opacity_anim.setEasingCurve(QEasingCurve.Type.OutBack)
-            
-            # Position animation (slide up)
-            pos_anim = QPropertyAnimation(btn, b"pos")
-            pos_anim.setDuration(600)
-            start_pos = btn.pos()
-            # Start slightly lower
-            btn.move(start_pos.x(), start_pos.y() + 50)
-            pos_anim.setStartValue(QPoint(start_pos.x(), start_pos.y() + 50))
-            pos_anim.setEndValue(start_pos)
-            pos_anim.setEasingCurve(QEasingCurve.Type.OutBack)
-            
-            # Group for this button
-            btn_group = QParallelAnimationGroup()
-            btn_group.addAnimation(opacity_anim)
-            btn_group.addAnimation(pos_anim)
-            
-            # Add delay using a sequential group
-            seq_group = QSequentialAnimationGroup()
-            seq_group.addPause(delay)
-            seq_group.addAnimation(btn_group)
-            
-            self.button_animations.addAnimation(seq_group)
-            delay += 100
-            
-        self.button_animations.start()
-
-    def fade_in_animation(self):
-        """Smooth fade in for entire window"""
-        self.opacity_timer = QTimer()
-        self.current_opacity = 0
-        
-        def increase_opacity():
-            self.current_opacity += 0.05
-            if self.current_opacity >= 1:
-                self.current_opacity = 1
-                self.opacity_timer.stop()
-            self.setWindowOpacity(self.current_opacity)
-        
-        self.opacity_timer.timeout.connect(increase_opacity)
-        self.opacity_timer.start(20)
+    # ------------------------------------------------------------------ UI
 
     def init_ui(self):
-        # Main container with animated background
-        container = NetworkBackground()
-        # Removed static stylesheet as NetworkBackground handles painting
-        
-        # Main vertical layout for notification banner + content
-        main_container_layout = QVBoxLayout(container)
-        main_container_layout.setContentsMargins(0, 0, 0, 0)
-        main_container_layout.setSpacing(0)
-        
-        # Notification banner at top
-        self.notification_banner = NotificationBanner()
-        main_container_layout.addWidget(self.notification_banner)
-        
-        # Content area
-        content_area = QWidget()
-        content_area.setStyleSheet("background: transparent;")
-        main_layout = QVBoxLayout(content_area)
-        main_layout.setContentsMargins(40, 40, 40, 40)
-        main_layout.setSpacing(20)
+        root = QWidget()
+        root.setObjectName("Root")
+        page = QVBoxLayout(root)
+        page.setContentsMargins(24, 20, 24, 16)
+        page.setSpacing(16)
 
-        # Header section (Full Width)
-        header_container = QWidget()
-        header_container.setStyleSheet("background: transparent;")
-        header_layout = QVBoxLayout(header_container)
-        header_layout.setSpacing(10)
-        
-        # Title with glow effect
-        title = QLabel("🔐 SecureVault")
-        title.setStyleSheet("""
-            color: white;
-            font-size: 42px;
-            font-weight: bold;
-            background: transparent;
-        """)
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        # Subtitle
-        subtitle = QLabel("Ransomware Detection & Protection System")
-        subtitle.setStyleSheet("""
-            color: #00ADB5;
-            font-size: 16px;
-            background: transparent;
-            letter-spacing: 2px;
-        """)
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        header_layout.addWidget(title)
-        header_layout.addWidget(subtitle)
-        main_layout.addWidget(header_container)
+        page.addLayout(self.build_header())
+        page.addWidget(self.build_scope_card())
+        page.addLayout(self.build_stats())
 
-        # Split View Container (Left: Buttons, Right: Activity)
-        split_container = QWidget()
-        split_layout = QHBoxLayout(split_container)
-        split_layout.setContentsMargins(0, 20, 0, 0)
-        split_layout.setSpacing(40)
+        body = QHBoxLayout()
+        body.setSpacing(16)
+        left = QVBoxLayout()
+        left.setSpacing(16)
+        left.addWidget(self.build_protection_card())
+        left.addWidget(self.build_actions_card())
+        left.addStretch()
+        left_widget = QWidget()
+        left_widget.setLayout(left)
+        left_widget.setFixedWidth(380)
+        left.setContentsMargins(0, 0, 0, 0)
 
-        # === LEFT PANEL (Status + Buttons) ===
-        left_panel = QWidget()
-        left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(20)
-        left_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        right = QVBoxLayout()
+        right.setSpacing(16)
+        right.setContentsMargins(0, 0, 0, 0)
+        right.addWidget(self.build_load_card())
+        right.addWidget(self.build_activity_card(), 1)
 
-        # === Scope Button (Compact) ===
-        self.scope_btn = QPushButton(f"📂 Scope: {os.path.basename(self.folder_to_monitor) or self.folder_to_monitor}")
-        self.scope_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.scope_btn.setToolTip(f"Current: {self.folder_to_monitor}\nClick to change folder")
-        self.scope_btn.setStyleSheet("""
-            QPushButton {
-                background: rgba(0, 173, 181, 0.1);
-                color: #00ADB5;
-                border: 1px solid rgba(0, 173, 181, 0.3);
-                border-radius: 15px;
-                padding: 8px 15px;
-                font-size: 12px;
-                font-weight: bold;
-                text-align: left;
-            }
-            QPushButton:hover {
-                background: rgba(0, 173, 181, 0.2);
-                border: 1px solid #00ADB5;
-            }
-        """)
-        self.scope_btn.clicked.connect(self.change_folder)
-        left_layout.addWidget(self.scope_btn)
+        body.addWidget(left_widget)
+        body.addLayout(right, 1)
+        page.addLayout(body, 1)
+        self.setCentralWidget(root)
 
-        # Status indicator
-        self.status_label = QLabel("🟢 System Ready")
-        self.status_label.setStyleSheet("""
-            color: #4ecca3;
-            font-size: 18px;
-            font-weight: bold;
-            background: transparent;
-            padding: 10px;
-            border: 1px solid rgba(78, 204, 163, 0.3);
-            border-radius: 10px;
-        """)
-        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        left_layout.addWidget(self.status_label)
-        
-        # Add pulsing animation to status
-        self.start_status_pulse()
+        status = QStatusBar()
+        status.setSizeGripEnabled(False)
+        self.status_text = QLabel("Ready")
+        self.scan_text = QLabel("No scan run this session")
+        version = QLabel(f"{APP_NAME} v{APP_VERSION}")
+        status.addWidget(self.status_text, 1)
+        status.addPermanentWidget(self.scan_text)
+        status.addPermanentWidget(version)
+        self.setStatusBar(status)
 
-        # Action buttons section
-        buttons_label = QLabel("Quick Actions")
-        buttons_label.setStyleSheet("""
-            color: white;
-            font-size: 24px;
-            font-weight: bold;
-            background: transparent;
-            margin-top: 10px;
-        """)
-        left_layout.addWidget(buttons_label)
+    def build_header(self):
+        header = QHBoxLayout()
+        header.setSpacing(12)
+        self.logo = ShieldLogo(42)
+        titles = QVBoxLayout()
+        titles.setSpacing(0)
+        title = QLabel(APP_NAME)
+        title.setObjectName("BrandTitle")
+        subtitle = QLabel("Ransomware detection & prevention")
+        subtitle.setObjectName("BrandSubtitle")
+        titles.addWidget(title)
+        titles.addWidget(subtitle)
+        header.addWidget(self.logo)
+        header.addLayout(titles)
+        header.addStretch()
 
-        # Action buttons grid
-        buttons_container = QWidget()
-        buttons_container.setStyleSheet("background: transparent;")
-        buttons_layout = QGridLayout(buttons_container)
-        buttons_layout.setSpacing(15)
+        self.sound_btn = QPushButton()
+        self.sound_btn.setProperty("variant", "ghost")
+        self.sound_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.sound_btn.clicked.connect(self.toggle_sound)
+        self._update_sound_btn()
+        header.addWidget(self.sound_btn)
 
-        # Define buttons with their properties
-        self.buttons = {}
-        button_configs = [
-            ("🛡️ Create Baseline", "Generate file hash baseline", self.create_baseline, 0, 0, "baseline"),
-            ("🔍 Manual Scan", "Check for file changes", self.check_changes, 0, 1, "scan"),
-            ("🧲 Create Honeypot", "Deploy trap file", self.create_honeypot, 1, 0, "honeypot"),
-            ("👁️ Real-Time Monitor", "Watch files live", self.start_monitor, 1, 1, "monitor"),
-            ("⚙️ CPU Monitor", "Track suspicious processes", self.start_cpu_monitor, 2, 0, "cpu"),
-            ("📄 View Logs", "Activity history", self.view_logs, 2, 1, "logs")
-        ]
+        self.status_pill = StatusPill()
+        self.status_pill.clicked.connect(self.acknowledge_threat)
+        header.addWidget(self.status_pill)
+        return header
 
-        for label, desc, callback, row, col, key in button_configs:
-            btn = AnimatedButton(label, desc, callback)
-            self.buttons[key] = btn
-            buttons_layout.addWidget(btn, row, col)
+    def build_scope_card(self):
+        card = Card()
+        card.body.setContentsMargins(18, 12, 12, 12)
+        row = QHBoxLayout()
+        row.setSpacing(12)
+        icon = QLabel("📁")
+        icon.setStyleSheet("font-size: 20px;")
+        text = QVBoxLayout()
+        text.setSpacing(0)
+        label = QLabel("PROTECTED FOLDER")
+        label.setObjectName("StatLabel")
+        self.scope_label = ElidedLabel(self.folder_to_monitor)
+        self.scope_label.setStyleSheet("font-size: 14px; font-weight: 600;")
+        text.addWidget(label)
+        text.addWidget(self.scope_label)
+        open_btn = QPushButton("Open")
+        open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        open_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(self.folder_to_monitor)))
+        change_btn = QPushButton("Change folder...")
+        change_btn.setProperty("variant", "primary")
+        change_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        change_btn.clicked.connect(self.change_folder)
+        row.addWidget(icon)
+        row.addLayout(text, 1)
+        row.addWidget(open_btn)
+        row.addWidget(change_btn)
+        card.body.addLayout(row)
+        return card
 
-        left_layout.addWidget(buttons_container)
-        split_layout.addWidget(left_panel, 60) # 60% width
+    def build_stats(self):
+        grid = QHBoxLayout()
+        grid.setSpacing(16)
+        self.stat_protection = StatCard("Protection", "Off", "Real-time monitor is off", theme.MUTED)
+        self.stat_baseline = StatCard("Baseline", "Loading...", "")
+        self.stat_honeypot = StatCard("Honeypot", "-", "")
+        self.stat_threats = StatCard("Alerts this session", "0", "")
+        for card in (self.stat_protection, self.stat_baseline, self.stat_honeypot, self.stat_threats):
+            grid.addWidget(card)
+        return grid
 
-        # === RIGHT PANEL (Activity Feed + CPU Graph) ===
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(10)
+    def build_protection_card(self):
+        card = Card("Live protection", "Watch the folder and running processes")
+        self.file_row = ToggleRow("Real-time file monitor", "Off")
+        self.cpu_row = ToggleRow("Process monitor", "Off")
+        self.file_row.switch.toggled.connect(self.set_file_monitor)
+        self.cpu_row.switch.toggled.connect(self.set_cpu_monitor)
+        card.body.addWidget(self.file_row)
+        divider = QWidget()
+        divider.setFixedHeight(1)
+        divider.setStyleSheet(f"background: {theme.BORDER};")
+        card.body.addWidget(divider)
+        card.body.addWidget(self.cpu_row)
+        return card
 
-        # CPU Graph Label
-        graph_label = QLabel("Live System Load")
-        graph_label.setStyleSheet("""
-            color: #00ADB5;
-            font-size: 22px;
-            font-weight: bold;
-            background: transparent;
-            margin-bottom: 5px;
-        """)
-        right_layout.addWidget(graph_label)
+    def build_actions_card(self):
+        card = Card("Actions")
+        grid = QVBoxLayout()
+        grid.setSpacing(8)
+        self.buttons = {
+            "baseline": ActionTile("🛡", "Create baseline", "Hash every file to record a known-good state", primary=True),
+            "scan": ActionTile("🔍", "Run integrity scan", "Compare files against the baseline"),
+            "honeypot": ActionTile("🧲", "Deploy honeypot", "Place a decoy file that triggers alerts"),
+            "logs": ActionTile("📄", "View activity log", "Browse everything SecureVault recorded"),
+        }
+        self.buttons["baseline"].clicked.connect(self.create_baseline)
+        self.buttons["scan"].clicked.connect(self.check_changes)
+        self.buttons["honeypot"].clicked.connect(self.create_honeypot)
+        self.buttons["logs"].clicked.connect(self.view_logs)
+        for btn in self.buttons.values():
+            grid.addWidget(btn)
+        card.body.addLayout(grid)
+        return card
 
-        # CPU Graph Widget
-        self.cpu_graph = CPUGraphWidget()
-        right_layout.addWidget(self.cpu_graph)
+    def build_load_card(self):
+        card = Card("System load", "CPU usage over the last minute")
+        self.load_label = QLabel("CPU --  ·  RAM --")
+        self.load_label.setObjectName("Muted")
+        self.load_label.setStyleSheet("font-weight: 600;")
+        card.header.addWidget(self.load_label)
+        self.graph = SystemLoadGraph()
+        self.graph.sampled.connect(self.on_load_sample)
+        card.body.addWidget(self.graph)
+        return card
 
-        # Activity feed header with Export button
-        activity_header = QWidget()
-        activity_header_layout = QHBoxLayout(activity_header)
-        activity_header_layout.setContentsMargins(0, 10, 0, 0)
-        
-        activity_label = QLabel("Recent Activity")
-        activity_label.setStyleSheet("""
-            color: #00ADB5;
-            font-size: 22px;
-            font-weight: bold;
-            background: transparent;
-        """)
-        
-        export_btn = QPushButton("📄 Export Evidence")
-        export_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        export_btn.setStyleSheet("""
-            QPushButton {
-                background: rgba(0, 173, 181, 0.2);
-                color: #00ADB5;
-                border: 1px solid #00ADB5;
-                border-radius: 5px;
-                padding: 5px 10px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background: rgba(0, 173, 181, 0.4);
-            }
-        """)
-        export_btn.clicked.connect(self.export_report)
-        
-        activity_header_layout.addWidget(activity_label)
-        activity_header_layout.addStretch()
-        activity_header_layout.addWidget(export_btn)
-        
-        right_layout.addWidget(activity_header)
+    def build_activity_card(self):
+        card = Card("Activity", "Live feed of events detected this session")
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Search events...")
+        self.search.setClearButtonEnabled(True)
+        self.search.setFixedWidth(200)
+        self.search.textChanged.connect(self.apply_filter)
+        self.level_filter = QComboBox()
+        self.level_filter.addItems(["All events", "Alerts only", "Critical", "Warnings", "Info"])
+        self.level_filter.currentIndexChanged.connect(self.apply_filter)
+        clear = QPushButton("Clear")
+        clear.setProperty("variant", "ghost")
+        clear.clicked.connect(self.clear_feed)
+        export = QPushButton("Export report")
+        export.clicked.connect(self.export_report)
+        for w in (self.search, self.level_filter, clear, export):
+            card.header.addWidget(w)
 
-        self.activity_feed = QTextEdit()
-        self.activity_feed.setReadOnly(True)
-        # Removed fixed height to allow expansion
-        self.activity_feed.setStyleSheet("""
-            QTextEdit {
-                background-color: rgba(10, 10, 20, 0.9);
-                border: 2px solid #00ADB5;
-                border-radius: 12px;
-                color: #00ffea;
-                padding: 15px;
-                font-size: 14px;
-                font-family: 'Consolas', 'Courier New', monospace;
-                selection-background-color: #00ADB5;
-                selection-color: white;
-            }
-            QScrollBar:vertical {
-                background: rgba(0, 0, 0, 0.3);
-                width: 12px;
-                border-radius: 6px;
-            }
-            QScrollBar::handle:vertical {
-                background: #00ADB5;
-                border-radius: 6px;
-                min-height: 20px;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                background: none;
-            }
-        """)
-        self.activity_feed.append("System initialized successfully...")
-        right_layout.addWidget(self.activity_feed)
-        
-        split_layout.addWidget(right_panel, 40) # 40% width
+        self.table = QTableWidget(0, 3)
+        self.table.setHorizontalHeaderLabels(["TIME", "LEVEL", "EVENT"])
+        self.table.verticalHeader().setVisible(False)
+        self.table.setShowGrid(False)
+        self.table.setWordWrap(False)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.table.verticalHeader().setDefaultSectionSize(34)
+        header = self.table.horizontalHeader()
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.table.setColumnWidth(0, 86)
+        self.table.setColumnWidth(1, 96)
+        self.table.setTextElideMode(Qt.TextElideMode.ElideMiddle)
+        self.table.cellDoubleClicked.connect(self.open_event_path)
+        card.body.addWidget(self.table, 1)
 
-        main_layout.addWidget(split_container)
-
-        # Add content to main container
-        main_container_layout.addWidget(content_area)
-
-        self.setCentralWidget(container)
-
-        # Start queue polling for real-time logs
-        self.start_queue_polling()
-
-        # Setup System Tray
-        self.setup_tray_icon()
+        self.empty_hint = QLabel("No events match the current filter")
+        self.empty_hint.setObjectName("Muted")
+        self.empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_hint.hide()
+        card.body.addWidget(self.empty_hint)
+        return card
 
     def setup_tray_icon(self):
-        """Initialize system tray icon"""
-        self.tray_icon = QSystemTrayIcon(self)
-        self.tray_icon.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon))
-        
-        # Tray menu
-        tray_menu = QMenu()
-        show_action = QAction("Show SecureVault", self)
-        show_action.triggered.connect(self.show)
+        self.tray_icon = QSystemTrayIcon(make_app_icon(), self)
+        self.tray_icon.setToolTip(APP_NAME)
+        menu = QMenu(self)
+        show_action = QAction(f"Open {APP_NAME}", self)
+        show_action.triggered.connect(self.restore_window)
         quit_action = QAction("Quit", self)
-        quit_action.triggered.connect(QApplication.instance().quit)
-        
-        tray_menu.addAction(show_action)
-        tray_menu.addAction(quit_action)
-        
-        self.tray_icon.setContextMenu(tray_menu)
-        self.tray_icon.show()
-        
-        # Double click to show
-        self.tray_icon.activated.connect(
-            lambda reason: self.show() if reason == QSystemTrayIcon.ActivationReason.DoubleClick else None
-        )
+        quit_action.triggered.connect(self.quit_app)
+        menu.addAction(show_action)
+        menu.addSeparator()
+        menu.addAction(quit_action)
+        self.tray_icon.setContextMenu(menu)
+        self.tray_icon.activated.connect(self._on_tray_activated)
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            self.tray_icon.show()
 
-    def closeEvent(self, event):
-        """Minimize to tray instead of closing"""
-        if self.tray_icon.isVisible():
-            self.hide()
-            self.tray_icon.showMessage(
-                "SecureVault",
-                "Application minimized to tray. Right-click icon to quit.",
-                QSystemTrayIcon.MessageIcon.Information,
-                2000
-            )
-            event.ignore()
+    # ------------------------------------------------------------ workers
+
+    def _silent(self, event):
+        return event
+
+    def sink(self, event):
+        """Backend event sink; safe to call from any thread."""
+        self.bridge.event.emit(event)
+
+    def run_task(self, key, fn, *args, **kwargs):
+        token = next(self._tokens)
+        self._running[key] = token
+
+        def target():
+            try:
+                result = fn(*args, **kwargs)
+            except Exception as e:  # Surface unexpected backend failures instead of dying silently
+                self.bridge.task_failed.emit(key, token, str(e))
+            else:
+                self.bridge.task_done.emit(key, token, result)
+
+        threading.Thread(target=target, name=f"securevault-{key}", daemon=True).start()
+        return token
+
+    def on_task_done(self, key, token, result):
+        if self._running.get(key) != token:
+            return  # A newer run of this task has already taken over
+        del self._running[key]
+        if key == "baseline":
+            self.buttons["baseline"].set_busy(False)
+            if result:
+                self.baseline_meta = self._meta_from(result)
+                self.refresh_baseline()
+        elif key == "scan":
+            self.buttons["scan"].set_busy(False)
+            if result is not None:
+                self.last_scan = datetime.datetime.now()
+                issues = len(result["modified"]) + len(result["deleted"])
+                self.scan_text.setText(f"Last scan {self.last_scan:%H:%M:%S}: "
+                                       + (f"{issues} change(s) found" if issues else "no changes"))
+        elif key == "honeypot":
+            self.buttons["honeypot"].set_busy(False)
+            self.refresh_honeypot()
+        elif key == "load_baseline":
+            self.baseline_meta = result
+            self.refresh_baseline()
+        elif key in ("file_monitor", "cpu_monitor"):
+            # The monitor ended (stopped by the user, or failed to start)
+            self._stop_events.pop(key, None)
+            row = self.file_row if key == "file_monitor" else self.cpu_row
+            row.switch.set_checked_silently(False)
+            self.refresh_protection()
+
+    def on_task_failed(self, key, token, error):
+        self.on_task_done(key, token, None)
+        self.on_event(emit(self._silent, WARNING, f"{key.replace('_', ' ').capitalize()} failed: {error}"))
+
+    # ------------------------------------------------------------- events
+
+    def on_event(self, event):
+        self.events.append(event)
+        self.counts[event.level] = self.counts.get(event.level, 0) + 1
+        self.add_event_row(event)
+        self.status_text.setText(event.message)
+
+        now = time.time()
+        if event.level == CRITICAL:
+            self.threat_active = True
+            self.toasts.show("Threat detected", self._short(event), CRITICAL)
+            self._last_toast = now
+            SoundManager.play_alert()
+            QApplication.alert(self)
+            if not self.isVisible() and self.tray_icon.isVisible():
+                self.tray_icon.showMessage(f"{APP_NAME}: threat detected", event.message,
+                                           QSystemTrayIcon.MessageIcon.Critical, 8000)
+        elif event.level in (WARNING, SUCCESS):
+            # Individual scan findings go to the feed only; the scan summary gets the toast
+            per_file_scan = event.category == "scan" and event.path
+            if not per_file_scan and now - self._last_toast > 1.2:
+                title = {"warning": "Warning", "success": "Done"}[event.level]
+                self.toasts.show(title, self._short(event), event.level)
+                self._last_toast = now
+            if event.level == WARNING and not per_file_scan and now - self._last_beep > 3:
+                SoundManager.play_warning()
+                self._last_beep = now
+
+        if event.category == "honeypot":
+            self.refresh_honeypot()
+        self.refresh_threats()
+        self.refresh_protection()
+
+    def _short(self, event):
+        """Toast-sized message: full paths are reduced to file names."""
+        message = event.message
+        if event.path:
+            for part in event.path.split(" -> "):
+                message = message.replace(part, os.path.basename(part) or part)
+        message = message.replace(self.folder_to_monitor + os.sep, "")
+        return message if len(message) <= 160 else message[:157] + "..."
+
+    def add_event_row(self, event):
+        self.table.insertRow(0)
+        time_item = QTableWidgetItem(time.strftime("%H:%M:%S", time.localtime(event.timestamp)))
+        time_item.setForeground(QColor(theme.MUTED))
+        time_item.setToolTip(event.time_str)
+        color = QColor(theme.LEVEL_COLORS.get(event.level, theme.INFO))
+        level_item = QTableWidgetItem(f"●  {theme.LEVEL_LABELS.get(event.level, event.level.upper())}")
+        level_item.setForeground(color)
+        font = QFont(theme.FONT_FAMILY, 8)
+        font.setBold(True)
+        level_item.setFont(font)
+        message_item = QTableWidgetItem(event.message)
+        message_item.setToolTip(event.message + ("\n\nDouble-click to show in folder" if event.path else ""))
+        if event.level == CRITICAL:
+            message_item.setForeground(QColor("#fecaca"))
+        message_item.setData(Qt.ItemDataRole.UserRole, event)
+        self.table.setItem(0, 0, time_item)
+        self.table.setItem(0, 1, level_item)
+        self.table.setItem(0, 2, message_item)
+        if self.table.rowCount() > MAX_FEED_ROWS:
+            self.table.removeRow(self.table.rowCount() - 1)
+        self._apply_filter_to_row(0)
+        self._update_empty_hint()
+
+    def _row_matches(self, event):
+        needle = self.search.text().strip().lower()
+        if needle and needle not in event.message.lower():
+            return False
+        allowed = {
+            0: None,
+            1: {WARNING, CRITICAL},
+            2: {CRITICAL},
+            3: {WARNING},
+            4: {INFO, SUCCESS},
+        }[self.level_filter.currentIndex()]
+        return allowed is None or event.level in allowed
+
+    def _apply_filter_to_row(self, row):
+        item = self.table.item(row, 2)
+        event = item.data(Qt.ItemDataRole.UserRole) if item else None
+        self.table.setRowHidden(row, bool(event) and not self._row_matches(event))
+
+    def apply_filter(self, *_):
+        for row in range(self.table.rowCount()):
+            self._apply_filter_to_row(row)
+        self._update_empty_hint()
+
+    def _update_empty_hint(self):
+        visible = any(not self.table.isRowHidden(r) for r in range(self.table.rowCount()))
+        self.empty_hint.setVisible(not visible)
+
+    def clear_feed(self):
+        self.table.setRowCount(0)
+        self._update_empty_hint()
+
+    def open_event_path(self, row, _column):
+        item = self.table.item(row, 2)
+        event = item.data(Qt.ItemDataRole.UserRole) if item else None
+        if not (event and event.path):
+            return
+        target = event.path if os.path.isdir(event.path) else os.path.dirname(event.path)
+        if os.path.isdir(target):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(target))
+
+    def on_load_sample(self, cpu, mem):
+        self.load_label.setText(f"CPU {cpu:.0f}%  ·  RAM {mem:.0f}%")
+
+    # ------------------------------------------------------------- status
+
+    def refresh_protection(self):
+        file_on = "file_monitor" in self._stop_events
+        cpu_on = "cpu_monitor" in self._stop_events
+        self.file_row.state.setText(f"Watching {os.path.basename(self.folder_to_monitor) or self.folder_to_monitor}"
+                                    if file_on else "Off - changes are not being watched")
+        self.cpu_row.state.setText("Watching for sustained high CPU usage" if cpu_on else "Off")
+        if file_on and cpu_on:
+            self.stat_protection.set("Full", "File and process monitors running", theme.SUCCESS)
+        elif file_on:
+            self.stat_protection.set("Active", "File monitor running", theme.SUCCESS)
+        elif cpu_on:
+            self.stat_protection.set("Partial", "Only the process monitor is running", theme.WARNING)
         else:
-            event.accept()
+            self.stat_protection.set("Off", "Turn on the real-time monitor", theme.MUTED)
 
-    def export_report(self):
-        """Export activity log to HTML"""
-        SoundManager.play_click()
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        filename = f"Evidence_Report_{timestamp}.html"
-        
-        content = self.activity_feed.toHtml()
-        
-        html_template = f"""
-        <html>
-        <head>
-            <style>
-                body {{ font-family: Arial, sans-serif; background: #1a1a1a; color: #e0e0e0; padding: 20px; }}
-                h1 {{ color: #00ADB5; border-bottom: 2px solid #00ADB5; padding-bottom: 10px; }}
-                .timestamp {{ color: #888; font-size: 0.9em; }}
-                .log-container {{ background: #2a2a2a; padding: 15px; border-radius: 10px; border: 1px solid #444; }}
-            </style>
-        </head>
-        <body>
-            <h1>🔐 SecureVault Evidence Report</h1>
-            <p class="timestamp">Generated on: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
-            <div class="log-container">
-                {content}
-            </div>
-        </body>
-        </html>
-        """
-        
-        try:
-            with open(filename, "w", encoding="utf-8") as f:
-                f.write(html_template)
-            
-            SoundManager.play_success()
-            self.notification_banner.show_notification(f"Report saved: {filename}", "success")
-            os.startfile(filename) # Open report automatically
-        except Exception as e:
-            self.notification_banner.show_notification(f"Export failed: {str(e)}", "error")
+        if self.threat_active:
+            self.status_pill.set_state("THREAT DETECTED", theme.CRITICAL, pulse=True,
+                                       tooltip="A critical alert was raised. Click to acknowledge.")
+            self.logo.set_color(theme.CRITICAL)
+        elif file_on:
+            self.status_pill.set_state("PROTECTED", theme.SUCCESS, pulse=True, tooltip="Real-time protection is on")
+            self.logo.set_color(theme.ACCENT)
+        else:
+            self.status_pill.set_state("UNPROTECTED", theme.WARNING, tooltip="Real-time file monitoring is off")
+            self.logo.set_color(theme.ACCENT)
 
-    def start_status_pulse(self):
-        """Pulsing animation for status indicator"""
-        self.pulse_timer = QTimer()
-        self.pulse_state = 0
-        
-        def pulse():
-            self.pulse_state = (self.pulse_state + 1) % 20
-            opacity = 0.7 + 0.3 * abs(10 - self.pulse_state) / 10
-            current_style = self.status_label.styleSheet()
-            # Keep the color but adjust opacity feel through font weight
-            self.status_label.setStyleSheet(current_style)
-        
-        self.pulse_timer.timeout.connect(pulse)
-        self.pulse_timer.start(100)
+    def acknowledge_threat(self):
+        if self.threat_active:
+            self.threat_active = False
+            self.refresh_protection()
+            self.on_event(emit(self._silent, INFO, "Threat alert acknowledged"))
 
-    def update_status(self, message, color="#4ecca3"):
-        self.status_label.setText(message)
-        self.status_label.setStyleSheet(f"""
-            color: {color};
-            font-size: 18px;
-            font-weight: bold;
-            background: transparent;
-            padding: 15px;
-        """)
-        self.activity_feed.append(f"• {message}")
-        self.activity_feed.moveCursor(QTextCursor.MoveOperation.End)
-        
-        # Smooth scroll animation
-        scrollbar = self.activity_feed.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
-    
-    def start_queue_polling(self):
-        """Poll the alert queue for real-time updates from backend"""
-        self.queue_timer = QTimer()
-        self.queue_timer.timeout.connect(self.check_alert_queue)
-        self.queue_timer.start(500)  # Check every 500ms
-        
+    def refresh_threats(self):
+        crit, warn = self.counts.get(CRITICAL, 0), self.counts.get(WARNING, 0)
+        accent = theme.CRITICAL if crit else theme.WARNING if warn else theme.SUCCESS
+        caption = f"{crit} critical · {warn} warnings" if crit or warn else "Nothing suspicious so far"
+        self.stat_threats.set(crit + warn, caption, accent)
+
+    def refresh_honeypot(self):
+        path = honeypot_path(self.folder_to_monitor)
+        if os.path.exists(path):
+            self.stat_honeypot.set("Deployed", os.path.basename(path), theme.SUCCESS)
+        else:
+            self.stat_honeypot.set("Not deployed", "Deploy a decoy to catch intruders", theme.MUTED)
+
+    @staticmethod
+    def _meta_from(baseline):
+        if not baseline:
+            return None
+        return {"count": len(baseline["files"]), "created": baseline.get("created"), "folder": baseline.get("folder")}
+
+    def reload_baseline_meta(self):
+        self.run_task("load_baseline", lambda: self._meta_from(load_baseline()))
+
+    def refresh_baseline(self):
+        meta = self.baseline_meta
+        if not meta:
+            self.stat_baseline.set("None", "Create a baseline to enable scans", theme.WARNING)
+            return
+        created = meta.get("created")
+        when = created.replace("T", " ")[:16] if created else "unknown date"
+        folder = meta.get("folder")
+        if folder and os.path.normcase(folder) != os.path.normcase(self.folder_to_monitor):
+            self.stat_baseline.set(f"{meta['count']:,} files", f"Made for another folder: {folder}", theme.WARNING)
+        else:
+            self.stat_baseline.set(f"{meta['count']:,} files", f"Created {when}", theme.SUCCESS)
+
+    # ------------------------------------------------------------ actions
+
     def change_folder(self):
-        """Change the monitored directory"""
-        folder = QFileDialog.getExistingDirectory(self, "Select Folder to Monitor", self.folder_to_monitor)
-        if folder:
-            self.folder_to_monitor = folder
-            # Update button text with folder name (or full path if short)
-            display_name = os.path.basename(folder) or folder
-            self.scope_btn.setText(f"📂 Scope: {display_name}")
-            self.scope_btn.setToolTip(f"Current: {folder}\nClick to change folder")
-            
-            self.update_status(f"📂 Scope changed to: {folder}", "#3498db")
-            self.notification_banner.show_notification(f"Monitoring scope updated: {folder}", "info")
-            
-            # If monitoring was active, stop it (user needs to restart)
-            if self.file_monitor_active:
-                self.start_monitor() # This toggles it OFF
-                self.notification_banner.show_notification("Monitoring stopped due to scope change. Please restart.", "warning")
-    
-    def check_alert_queue(self):
-        """Check queue for new alerts and display them"""
-        try:
-            while not self.alert_queue.empty():
-                message = self.alert_queue.get_nowait()
-                
-                # Only show banner for critical/warning events
-                if "MASS FILE CHANGES" in message or "🚨" in message:
-                    self.notification_banner.show_notification(message, "critical")
-                    self.update_status(f"🚨 ALERT: {message}", "#e74c3c")
-                    SoundManager.play_alert()
-                elif "High sustained CPU" in message:
-                    self.notification_banner.show_notification(message, "warning")
-                    self.update_status(f"⚠️ {message}", "#f39c12")
-                    SoundManager.play_alert()
-                elif "modified" in message.lower() or "deleted" in message.lower():
-                    # Show banner only for file changes, not for routine messages
-                    if "File changed:" in message or "Deleted:" in message:
-                        self.notification_banner.show_notification(f"File {message}", "warning")
-                        SoundManager.play_alert()
-                    self.update_status(f"⚠️ {message}", "#e67e22")
-                elif "created" in message.lower() and "New file" in message:
-                    # Show banner only for new file creation
-                    self.notification_banner.show_notification(message, "info")
-                    self.update_status(f"ℹ️ {message}", "#3498db")
-                    SoundManager.play_success()
-                else:
-                    # Routine messages (monitoring started, no threats, etc.) - NO BANNER
-                    self.update_status(message, "#00ADB5")
-        except queue.Empty:
-            pass
+        folder = QFileDialog.getExistingDirectory(self, "Select Folder to Protect", self.folder_to_monitor)
+        if not folder:
+            return
+        folder = normalize_path(folder)
+        if folder == self.folder_to_monitor:
+            return
+        self.folder_to_monitor = folder
+        self.scope_label.setText(folder)
+        restart = "file_monitor" in self._stop_events
+        self.on_event(emit(self._silent, INFO, f"Protected folder changed to {folder}"))
+        if restart:
+            self.set_file_monitor(False)
+            self.file_row.switch.set_checked_silently(True)
+            self.set_file_monitor(True)
+        self.refresh_honeypot()
+        self.refresh_baseline()
 
-    # === Functional Connections ===
     def create_baseline(self):
-        self.buttons["baseline"].set_loading(True)
-        self.update_status("🛡️ Creating baseline...", "#00ADB5")
-        self.notification_banner.show_notification("Creating file hash baseline...", "info")
-        threading.Thread(target=create_baseline, args=(self.folder_to_monitor,), daemon=True).start()
-        QTimer.singleShot(2000, lambda: [
-            self.buttons["baseline"].set_loading(False),
-            self.update_status("🟢 Baseline created successfully", "#4ecca3"),
-            self.notification_banner.show_notification("Baseline created successfully!", "success")
-        ])
+        self.buttons["baseline"].set_busy(True, "Indexing files...")
+        self.run_task("baseline", create_baseline, self.folder_to_monitor, self.sink)
 
     def check_changes(self):
-        self.buttons["scan"].set_loading(True)
-        self.update_status("🔍 Scanning for changes...", "#00ADB5")
-        self.notification_banner.show_notification("Scanning for file changes...", "info")
-        threading.Thread(target=check_for_changes, daemon=True).start()
-        QTimer.singleShot(2000, lambda: [
-            self.buttons["scan"].set_loading(False),
-            self.update_status("🟢 Manual scan completed", "#4ecca3"),
-            self.notification_banner.show_notification("Scan completed - No threats detected", "success")
-        ])
+        self.buttons["scan"].set_busy(True, "Scanning...")
+        self.run_task("scan", check_for_changes, self.folder_to_monitor, self.sink)
 
     def create_honeypot(self):
-        self.buttons["honeypot"].set_loading(True)
-        self.update_status("🧲 Deploying honeypot...", "#00ADB5")
-        self.notification_banner.show_notification("Deploying honeypot trap file...", "info")
-        threading.Thread(target=create_honeypot, daemon=True).start()
-        QTimer.singleShot(1500, lambda: [
-            self.buttons["honeypot"].set_loading(False),
-            self.update_status("🟢 Honeypot deployed successfully", "#4ecca3"),
-            self.notification_banner.show_notification("Honeypot active - Monitoring for intrusions", "success")
-        ])
+        self.buttons["honeypot"].set_busy(True, "Deploying...")
+        self.run_task("honeypot", create_honeypot, self.folder_to_monitor, self.sink)
 
-    def start_monitor(self):
-        if not self.file_monitor_active:
-            # Start monitoring
-            self.file_monitor_active = True
-            self.file_stop_event.clear()
-            self.buttons["monitor"].update_label("🛑 Stop Monitor", "Click to stop watching")
-            self.buttons["monitor"].setStyleSheet("""
-                QFrame {
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                        stop:0 rgba(231, 76, 60, 0.2), stop:1 rgba(192, 57, 43, 0.1));
-                    border: 2px solid rgba(231, 76, 60, 0.5);
-                    border-radius: 15px;
-                }
-                QFrame:hover {
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                        stop:0 rgba(231, 76, 60, 0.3), stop:1 rgba(192, 57, 43, 0.2));
-                    border: 2px solid #e74c3c;
-                }
-            """)
-            self.buttons["monitor"].default_style = self.buttons["monitor"].styleSheet()
-            self.buttons["monitor"].hover_style = self.buttons["monitor"].styleSheet().replace("0.2", "0.4").replace("0.1", "0.3")
-            
-            self.update_status("👁️ Real-time file monitoring started", "#f39c12")
-            threading.Thread(target=start_real_time_monitor, args=(self.folder_to_monitor, self.alert_queue, self.file_stop_event), daemon=True).start()
-        else:
-            # Stop monitoring
-            self.file_monitor_active = False
-            self.file_stop_event.set()
-            self.buttons["monitor"].update_label("👁️ Real-Time Monitor", "Watch files live")
-            
-            # Reset style
-            self.buttons["monitor"].setStyleSheet("""
-                QFrame {
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                        stop:0 rgba(0, 173, 181, 0.2), stop:1 rgba(0, 212, 255, 0.1));
-                    border: 2px solid rgba(0, 173, 181, 0.5);
-                    border-radius: 15px;
-                }
-            """)
-            self.buttons["monitor"].default_style = self.buttons["monitor"].styleSheet()
-            self.buttons["monitor"].hover_style = """
-                QFrame {
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                        stop:0 rgba(0, 173, 181, 0.4), stop:1 rgba(0, 212, 255, 0.3));
-                    border: 2px solid #00ADB5;
-                }
-            """
-            self.update_status("🛑 Real-time monitoring stopped", "#e74c3c")
+    def set_file_monitor(self, enabled):
+        self._set_monitor("file_monitor", enabled, start_real_time_monitor,
+                          lambda stop: (self.folder_to_monitor, self.sink, stop))
 
-    def start_cpu_monitor(self):
-        if not self.cpu_monitor_active:
-            # Start monitoring
-            self.cpu_monitor_active = True
-            self.cpu_stop_event.clear()
-            self.buttons["cpu"].update_label("🛑 Stop CPU Monitor", "Click to stop tracking")
-            self.buttons["cpu"].setStyleSheet("""
-                QFrame {
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                        stop:0 rgba(231, 76, 60, 0.2), stop:1 rgba(192, 57, 43, 0.1));
-                    border: 2px solid rgba(231, 76, 60, 0.5);
-                    border-radius: 15px;
-                }
-                QFrame:hover {
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                        stop:0 rgba(231, 76, 60, 0.3), stop:1 rgba(192, 57, 43, 0.2));
-                    border: 2px solid #e74c3c;
-                }
-            """)
-            self.buttons["cpu"].default_style = self.buttons["cpu"].styleSheet()
-            self.buttons["cpu"].hover_style = self.buttons["cpu"].styleSheet().replace("0.2", "0.4").replace("0.1", "0.3")
-            
-            self.update_status("⚙️ CPU process monitoring started", "#f39c12")
-            threading.Thread(target=monitor_processes_sustained, kwargs={'alert_queue': self.alert_queue, 'stop_event': self.cpu_stop_event}, daemon=True).start()
+    def set_cpu_monitor(self, enabled):
+        self._set_monitor("cpu_monitor", enabled, monitor_processes_sustained, None)
+
+    def _set_monitor(self, key, enabled, fn, args_for):
+        if enabled:
+            if key in self._stop_events:
+                return
+            stop = threading.Event()
+            self._stop_events[key] = stop
+            if args_for:
+                self.run_task(key, fn, *args_for(stop))
+            else:
+                self.run_task(key, fn, alert_queue=self.sink, stop_event=stop)
         else:
-            # Stop monitoring
-            self.cpu_monitor_active = False
-            self.cpu_stop_event.set()
-            self.buttons["cpu"].update_label("⚙️ CPU Monitor", "Track suspicious processes")
-            
-            # Reset style
-            self.buttons["cpu"].setStyleSheet("""
-                QFrame {
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                        stop:0 rgba(0, 173, 181, 0.2), stop:1 rgba(0, 212, 255, 0.1));
-                    border: 2px solid rgba(0, 173, 181, 0.5);
-                    border-radius: 15px;
-                }
-            """)
-            self.buttons["cpu"].default_style = self.buttons["cpu"].styleSheet()
-            self.buttons["cpu"].hover_style = """
-                QFrame {
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                        stop:0 rgba(0, 173, 181, 0.4), stop:1 rgba(0, 212, 255, 0.3));
-                    border: 2px solid #00ADB5;
-                }
-            """
-            self.update_status("🛑 CPU monitoring stopped", "#e74c3c")
+            stop = self._stop_events.pop(key, None)
+            if stop:
+                stop.set()
+            # Detach the old run so its late "finished" signal can't flip a restarted switch
+            self._running.pop(key, None)
+        self.refresh_protection()
 
     def view_logs(self):
-        # Log file is in the application directory, not necessarily the monitored folder
-        log_file = os.path.abspath("suspicious_activity.log")
-        self.log_window = LogViewerWindow(log_file)
+        self.log_window = LogViewerWindow(LOG_FILE, self)
         self.log_window.show()
-        self.update_status("📄 Logs opened", "#00ADB5")
+
+    def toggle_sound(self):
+        SoundManager.enabled = not SoundManager.enabled
+        self._update_sound_btn()
+
+    def _update_sound_btn(self):
+        self.sound_btn.setText("🔔  Sound on" if SoundManager.enabled else "🔕  Sound off")
+        self.sound_btn.setToolTip("Toggle audible alerts")
+
+    def export_report(self):
+        stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        default = os.path.join(os.path.expanduser("~"), "Documents", f"SecureVault_Report_{stamp}.html")
+        if not os.path.isdir(os.path.dirname(default)):
+            default = os.path.join(APP_DIR, os.path.basename(default))
+        path, _ = QFileDialog.getSaveFileName(self, "Export Evidence Report", default, "HTML Report (*.html)")
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(self.build_report_html())
+        except OSError as e:
+            self.on_event(emit(self._silent, WARNING, f"Report export failed: {e}"))
+            return
+        self.on_event(emit(self._silent, SUCCESS, f"Evidence report saved: {path}", path=path))
+        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    def build_report_html(self):
+        rows = []
+        for ev in reversed(self.events):
+            color = theme.LEVEL_COLORS.get(ev.level, theme.INFO)
+            rows.append(
+                f"<tr><td class='t'>{html.escape(ev.time_str)}</td>"
+                f"<td><span class='badge' style='color:{color};border-color:{color}'>"
+                f"{html.escape(theme.LEVEL_LABELS.get(ev.level, ev.level))}</span></td>"
+                f"<td>{html.escape(ev.category)}</td><td class='m'>{html.escape(ev.message)}</td></tr>"
+            )
+        crit, warn = self.counts.get(CRITICAL, 0), self.counts.get(WARNING, 0)
+        generated = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>{APP_NAME} Evidence Report</title>
+<style>
+body {{ font-family: 'Segoe UI', system-ui, sans-serif; background: {theme.BG}; color: {theme.TEXT}; margin: 0; padding: 32px; }}
+h1 {{ margin: 0 0 4px; font-size: 24px; }}
+.sub {{ color: {theme.MUTED}; margin-bottom: 24px; }}
+.cards {{ display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }}
+.card {{ background: {theme.SURFACE}; border: 1px solid {theme.BORDER}; border-radius: 12px; padding: 14px 18px; min-width: 160px; }}
+.card b {{ display: block; font-size: 22px; }}
+.card span {{ color: {theme.MUTED}; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }}
+table {{ width: 100%; border-collapse: collapse; background: {theme.SURFACE}; border: 1px solid {theme.BORDER}; border-radius: 12px; overflow: hidden; }}
+th {{ text-align: left; color: {theme.MUTED}; font-size: 11px; text-transform: uppercase; padding: 10px 12px; border-bottom: 1px solid {theme.BORDER}; }}
+td {{ padding: 8px 12px; border-bottom: 1px solid {theme.SURFACE_2}; font-size: 13px; vertical-align: top; }}
+td.t {{ color: {theme.MUTED}; white-space: nowrap; }}
+td.m {{ word-break: break-all; }}
+.badge {{ border: 1px solid; border-radius: 10px; padding: 1px 8px; font-size: 11px; font-weight: 700; }}
+</style></head><body>
+<h1>{APP_NAME} Evidence Report</h1>
+<div class="sub">Generated {generated} · Protected folder: {html.escape(self.folder_to_monitor)}</div>
+<div class="cards">
+<div class="card"><span>Events</span><b>{len(self.events)}</b></div>
+<div class="card"><span>Critical</span><b style="color:{theme.CRITICAL}">{crit}</b></div>
+<div class="card"><span>Warnings</span><b style="color:{theme.WARNING}">{warn}</b></div>
+</div>
+<table><thead><tr><th>Time</th><th>Level</th><th>Source</th><th>Event</th></tr></thead>
+<tbody>{''.join(rows) or "<tr><td colspan='4'>No events recorded this session.</td></tr>"}</tbody></table>
+</body></html>"""
+
+    # -------------------------------------------------------------- window
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "toasts"):
+            self.toasts.reposition()
+
+    def _on_tray_activated(self, reason):
+        if reason in (QSystemTrayIcon.ActivationReason.DoubleClick, QSystemTrayIcon.ActivationReason.Trigger):
+            self.restore_window()
+
+    def restore_window(self):
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def closeEvent(self, event):
+        """Keep protecting from the tray while a monitor is running."""
+        if not self._quitting and self._stop_events and self.tray_icon.isVisible():
+            self.hide()
+            if not self._tray_hint_shown:
+                self._tray_hint_shown = True
+                self.tray_icon.showMessage(APP_NAME, "Still protecting in the background. "
+                                           "Right-click the tray icon to quit.",
+                                           QSystemTrayIcon.MessageIcon.Information, 3000)
+            event.ignore()
+            return
+        self.quit_app()
+        event.accept()
+
+    def quit_app(self):
+        self._quitting = True
+        for stop in self._stop_events.values():
+            stop.set()
+        self._stop_events.clear()
+        self.tray_icon.hide()
+        QApplication.instance().quit()
 
 
-class SplashScreen(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedSize(500, 350)
-        
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        
-        # Main container
-        container = QFrame()
-        container.setStyleSheet("""
-            QFrame {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #0f0c29, stop:1 #24243e);
-                border: 2px solid #00ADB5;
-                border-radius: 20px;
-            }
-        """)
-        container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(40, 40, 40, 40)
-        container_layout.setSpacing(20)
-        
-        # Logo/Icon
-        logo = QLabel("🔐")
-        logo.setStyleSheet("""
-            font-size: 64px;
-            background: transparent;
-            border: none;
-        """)
-        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        # Title
-        title = QLabel("SecureVault")
-        title.setStyleSheet("""
-            color: white;
-            font-size: 36px;
-            font-weight: bold;
-            background: transparent;
-            border: none;
-        """)
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        # Subtitle
-        subtitle = QLabel("Ransomware Detection System")
-        subtitle.setStyleSheet("""
-            color: #00ADB5;
-            font-size: 14px;
-            letter-spacing: 3px;
-            background: transparent;
-            border: none;
-        """)
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        # Loading Status
-        self.status_label = QLabel("Initializing...")
-        self.status_label.setStyleSheet("""
-            color: #b0b0b0;
-            font-size: 12px;
-            background: transparent;
-            border: none;
-        """)
-        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        # Progress Bar
-        self.progress = QProgressBar()
-        self.progress.setStyleSheet("""
-            QProgressBar {
-                background-color: rgba(255, 255, 255, 0.1);
-                border-radius: 5px;
-                height: 6px;
-                text-align: center;
-            }
-            QProgressBar::chunk {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #00ADB5, stop:1 #00d4ff);
-                border-radius: 5px;
-            }
-        """)
-        self.progress.setTextVisible(False)
-        
-        container_layout.addStretch()
-        container_layout.addWidget(logo)
-        container_layout.addWidget(title)
-        container_layout.addWidget(subtitle)
-        container_layout.addStretch()
-        container_layout.addWidget(self.status_label)
-        container_layout.addWidget(self.progress)
-        
-        layout.addWidget(container)
-        
-        # Fade in animation
-        self.opacity_effect = QGraphicsOpacityEffect(self)
-        self.setGraphicsEffect(self.opacity_effect)
-        self.anim = QPropertyAnimation(self.opacity_effect, b"opacity")
-        self.anim.setDuration(500)
-        self.anim.setStartValue(0)
-        self.anim.setEndValue(1)
-        self.anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self.anim.start()
+def run_gui(show_splash=True):
+    if sys.platform == "win32":
+        try:  # Use our own taskbar icon instead of Python's
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("SecureVault.Dashboard")
+        except Exception:
+            pass
 
-def run_gui():
-    app = QApplication(sys.argv)
-    
-    # Show Splash Screen
-    splash = SplashScreen()
-    splash.show()
-    
-    # Main Window (hidden initially)
+    app = QApplication.instance() or QApplication(sys.argv)
+    app.setApplicationName(APP_NAME)
+    app.setApplicationVersion(APP_VERSION)
+    app.setStyle("Fusion")
+    app.setStyleSheet(theme.STYLESHEET)
+    app.setWindowIcon(make_app_icon())
+    app.setQuitOnLastWindowClosed(False)
+
     window = SecureVaultGUI()
-    
-    # Simulate loading process
-    progress = 0
-    
-    def update_loading():
-        nonlocal progress
-        progress += 2
-        splash.progress.setValue(progress)
-        
-        if progress < 30:
-            splash.status_label.setText("Initializing core modules...")
-        elif progress < 60:
-            splash.status_label.setText("Loading security definitions...")
-        elif progress < 80:
-            splash.status_label.setText("Starting monitoring engine...")
-        elif progress < 95:
-            splash.status_label.setText("Preparing user interface...")
-            
-        if progress >= 100:
-            timer.stop()
-            # Fade out splash
-            fade_out = QPropertyAnimation(splash.opacity_effect, b"opacity")
-            fade_out.setDuration(500)
-            fade_out.setStartValue(1)
-            fade_out.setEndValue(0)
-            fade_out.finished.connect(lambda: [splash.close(), window.show()])
-            fade_out.start()
-            
-            # Keep reference to avoid garbage collection
-            splash.fade_out = fade_out
-            
-    timer = QTimer()
-    timer.timeout.connect(update_loading)
-    timer.start(30)  # Total time approx 3 seconds
-    
+    if show_splash:
+        splash = SplashScreen()
+        splash.finished.connect(window.show)
+        splash.start()
+        app._splash = splash  # keep a reference until it finishes
+    else:
+        window.show()
     sys.exit(app.exec())
+
 
 if __name__ == "__main__":
     import signal
     signal.signal(signal.SIGINT, signal.SIG_DFL)  # Allow Ctrl+C to kill the app
-    try:
-        run_gui()
-    except KeyboardInterrupt:
-        print("\n👋 SecureVault GUI closed by user.")
-        sys.exit(0)
+    run_gui()
