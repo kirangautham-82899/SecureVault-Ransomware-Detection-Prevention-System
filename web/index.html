@@ -271,7 +271,7 @@ const COLORS = { info: "#4c8df6", success: "#2fbf8f", warning: "#f2a33a", critic
 const LABELS = { info: "Info", success: "OK", warning: "Warning", critical: "Critical" };
 const MARKS = { protected: "M39 60L54 75L82 45", threat: "M60 36V62M60 80V80", idle: "M48 46V74M72 46V74" };
 const MAX_ITEMS = 300;
-let filter = "all", metrics = [], unseen = 0, bannerTimer;
+let filter = "all", metrics = [], unseen = 0, bannerTimer, lastId = 0;
 
 function shortMessage(ev) {
   let msg = ev.message;
@@ -288,6 +288,7 @@ function matches(level) {
 }
 
 function addEvent(ev, live) {
+  if (ev.id) lastId = Math.max(lastId, ev.id);
   const li = document.createElement("li");
   li.className = ev.level + (live ? " new" : "");
   li.dataset.level = ev.level;
@@ -411,32 +412,65 @@ $("chips").addEventListener("click", e => {
 });
 window.addEventListener("resize", drawChart);
 
+function applySnapshot(d) {
+  $("feed").replaceChildren();
+  lastId = 0;
+  d.events.forEach(ev => addEvent(ev, false));
+  metrics = [];
+  d.metrics.forEach(addMetric);
+  applyState(d.state);
+  $("viewers").textContent = Math.max(1, d.viewers);
+  updateEmpty();
+  setLive("live");
+}
+
+function streamEnded() {
+  setLive("ended");
+  $("headline").textContent = "Stream ended";
+  $("subline").textContent = "The host stopped streaming or the link has expired.";
+}
+
+// Live connection (Server-Sent Events). Falls back to polling when it can't be
+// established, e.g. through Cloudflare quick tunnels.
 function connect() {
+  if (location.hostname.endsWith(".trycloudflare.com")) return startPolling();
   const es = new EventSource("/stream?token=" + encodeURIComponent(token));
-  es.addEventListener("snapshot", e => {
-    const d = JSON.parse(e.data);
-    $("feed").replaceChildren();
-    d.events.forEach(ev => addEvent(ev, false));
-    metrics = [];
-    d.metrics.forEach(addMetric);
-    applyState(d.state);
-    $("viewers").textContent = d.viewers + 1;
-    updateEmpty();
-    setLive("live");
-  });
+  let gotSnapshot = false;
+  const fallback = setTimeout(() => { if (!gotSnapshot) { es.close(); startPolling(); } }, 6000);
+  es.addEventListener("snapshot", e => { gotSnapshot = true; clearTimeout(fallback); applySnapshot(JSON.parse(e.data)); });
   es.addEventListener("event", e => addEvent(JSON.parse(e.data), true));
   es.addEventListener("state", e => applyState(JSON.parse(e.data)));
   es.addEventListener("metrics", e => addMetric(JSON.parse(e.data)));
   es.addEventListener("viewers", e => { $("viewers").textContent = JSON.parse(e.data).count; });
   es.onerror = () => {
-    if (es.readyState === EventSource.CLOSED) {
-      setLive("ended");
-      $("headline").textContent = "Stream ended";
-      $("subline").textContent = "The host stopped streaming or the link has expired.";
-    } else {
-      setLive("reconnecting");
-    }
+    if (es.readyState === EventSource.CLOSED) { clearTimeout(fallback); streamEnded(); }
+    else setLive("reconnecting");
   };
+}
+
+const clientId = Math.random().toString(36).slice(2, 12);
+let polled = false;
+async function startPolling() {
+  try {
+    const r = await fetch(`/api/poll?token=${encodeURIComponent(token)}&since=${polled ? lastId : 0}&client=${clientId}`,
+                          { cache: "no-store" });
+    if (r.status === 403) return streamEnded();
+    const d = await r.json();
+    if (!polled) { polled = true; applySnapshot(d); }
+    else {
+      d.events.forEach(ev => addEvent(ev, true));
+      applyState(d.state);
+      metrics = d.metrics.slice(-60);
+      const m = metrics[metrics.length - 1];
+      if (m) { $("cpu").textContent = `${Math.round(m.cpu)}%`; $("mem").textContent = `RAM ${Math.round(m.mem)}%`; }
+      drawChart();
+      $("viewers").textContent = Math.max(1, d.viewers);
+      setLive("live");
+    }
+  } catch (err) {
+    setLive("reconnecting");
+  }
+  setTimeout(startPolling, 2000);
 }
 drawChart();
 connect();

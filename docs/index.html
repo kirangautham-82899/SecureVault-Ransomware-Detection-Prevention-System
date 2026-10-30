@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SecureVault · Free ransomware protection for Windows</title>
+<meta name="description" content="SecureVault is a free ransomware detection and prevention app for Windows: real-time monitoring, honeypots, an antivirus scanner with quarantine, and live streaming to your phone. Free, with the source on GitHub.">
+<meta property="og:title" content="SecureVault · Free ransomware protection for Windows">
+<meta property="og:description" content="Real-time ransomware detection, honeypots, a built-in antivirus scanner and live streaming. Free, with the source on GitHub.">
+<meta property="og:image" content="https://kirangautham-82899.github.io/SecureVault-Ransomware-Detection-Prevention-System/dashboard.png">
+<meta name="theme-color" content="#4c8df6">
+<link rel="icon" href="logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #eef3fb; --bg-deep: #e2ebf8; --surface: #ffffff; --surface-2: #f5f8fe; --surface-3: #eaf1fc;
+  --border: #e1e9f6; --text: #1d2b4f; --muted: #6b7a9c; --subtle: #a6b3cf;
+  --accent: #4c8df6; --accent-2: #7aa9ff; --accent-deep: #3a78e6; --accent-soft: #e6f0ff;
+  --success: #2fbf8f; --warning: #f2a33a; --critical: #ef5b6e;
+  --shadow: 0 18px 50px rgba(76, 141, 246, .14), 0 2px 8px rgba(29, 43, 79, .05);
+  --radius: 22px;
+  --repo: "https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System";
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0; color: var(--text); font-family: Inter, "Segoe UI", system-ui, -apple-system, sans-serif;
+  background:
+    radial-gradient(1000px 600px at 90% -10%, rgba(122, 169, 255, .30), transparent 60%),
+    radial-gradient(800px 600px at -10% 40%, rgba(47, 191, 143, .10), transparent 60%),
+    linear-gradient(180deg, var(--bg), var(--bg-deep));
+  -webkit-font-smoothing: antialiased; line-height: 1.55; overflow-x: hidden;
+}
+a { color: inherit; text-decoration: none; }
+img { max-width: 100%; display: block; }
+.wrap { max-width: 1160px; margin: 0 auto; padding: 0 24px; }
+
+/* Nav */
+nav { position: sticky; top: 0; z-index: 20; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  background: rgba(238, 243, 251, .72); border-bottom: 1px solid rgba(225, 233, 246, .7); }
+nav .wrap { display: flex; align-items: center; gap: 28px; height: 68px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 18px; margin-right: auto; }
+.brand img { width: 32px; height: 32px; filter: drop-shadow(0 6px 10px rgba(76, 141, 246, .35)); }
+.links { display: flex; gap: 26px; font-size: 14.5px; font-weight: 500; color: var(--muted); }
+.links a:hover { color: var(--accent-deep); }
+
+/* Buttons */
+.btn { display: inline-flex; align-items: center; gap: 10px; padding: 13px 22px; border-radius: 14px; font-weight: 600;
+  font-size: 15px; border: 1px solid var(--border); background: var(--surface); box-shadow: 0 2px 8px rgba(29, 43, 79, .05);
+  transition: transform .2s, box-shadow .2s, background .2s; cursor: pointer; }
+.btn:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(76, 141, 246, .18); }
+.btn.primary { color: #fff; border: none; background: linear-gradient(135deg, var(--accent-2), var(--accent));
+  box-shadow: 0 12px 28px rgba(76, 141, 246, .35); }
+.btn.primary:hover { background: linear-gradient(135deg, var(--accent), var(--accent-deep)); }
+.btn.small { padding: 9px 16px; font-size: 14px; }
+.btn svg { width: 18px; height: 18px; }
+
+/* Hero */
+.hero { padding: 84px 0 40px; text-align: center; }
+.badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px 6px 8px; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--border); font-size: 13px; font-weight: 600; color: var(--muted);
+  box-shadow: 0 2px 8px rgba(29, 43, 79, .04); }
+.badge b { background: var(--accent-soft); color: var(--accent-deep); padding: 2px 9px; border-radius: 999px; }
+h1 { font-size: clamp(38px, 6vw, 66px); line-height: 1.05; letter-spacing: -2px; margin: 22px auto 18px; max-width: 900px; }
+h1 .grad { background: linear-gradient(120deg, var(--accent-deep), #8b7bff 60%, var(--accent-2));
+  -webkit-background-clip: text; background-clip: text; color: transparent; }
+.lead { font-size: clamp(16px, 2vw, 19px); color: var(--muted); max-width: 680px; margin: 0 auto 32px; }
+.cta { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+.meta { margin-top: 16px; font-size: 13px; color: var(--subtle); }
+.shot { margin: 56px auto 0; max-width: 1080px; border-radius: 26px; padding: 10px; background: rgba(255, 255, 255, .6);
+  border: 1px solid rgba(255, 255, 255, .9); box-shadow: 0 40px 90px rgba(58, 120, 230, .22); position: relative;
+  animation: float 7s ease-in-out infinite; }
+.shot img { border-radius: 18px; }
+.shot::before { content: ""; position: absolute; inset: -40px -60px auto auto; width: 260px; height: 260px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(122, 169, 255, .35), transparent 70%); z-index: -1; }
+@keyframes float { 50% { transform: translateY(-10px); } }
+
+/* Trust strip */
+.strip { display: flex; justify-content: center; gap: 36px; flex-wrap: wrap; margin: 46px 0 0; color: var(--muted);
+  font-size: 14px; font-weight: 600; }
+.strip span { display: inline-flex; align-items: center; gap: 8px; }
+.strip i { width: 8px; height: 8px; border-radius: 50%; background: var(--success); display: inline-block; }
+
+/* Sections */
+section { padding: 90px 0 10px; }
+.eyebrow { color: var(--accent-deep); font-weight: 700; font-size: 13px; letter-spacing: 1.5px; text-transform: uppercase; }
+h2 { font-size: clamp(28px, 4vw, 42px); letter-spacing: -1px; line-height: 1.15; margin: 10px 0 14px; }
+.section-head { text-align: center; max-width: 700px; margin: 0 auto 46px; }
+.section-head p { color: var(--muted); font-size: 17px; margin: 0; }
+
+/* Feature grid */
+.grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px;
+  box-shadow: var(--shadow); transition: transform .25s, box-shadow .25s; }
+.card:hover { transform: translateY(-4px); box-shadow: 0 24px 60px rgba(76, 141, 246, .2); }
+.card .icon { width: 46px; height: 46px; border-radius: 15px; display: grid; place-items: center; font-size: 22px;
+  background: var(--accent-soft); margin-bottom: 16px; }
+.card h3 { margin: 0 0 6px; font-size: 16.5px; }
+.card p { margin: 0; color: var(--muted); font-size: 14.5px; }
+
+/* Tour */
+.tabs { display: inline-flex; background: var(--surface-3); padding: 4px; border-radius: 14px; gap: 2px; flex-wrap: wrap;
+  justify-content: center; }
+.tabs button { border: 0; background: none; font: inherit; font-weight: 600; font-size: 14.5px; color: var(--muted);
+  padding: 9px 18px; border-radius: 11px; cursor: pointer; transition: all .2s; }
+.tabs button.active { background: var(--surface); color: var(--accent-deep); box-shadow: 0 4px 12px rgba(76, 141, 246, .18); }
+.tour { text-align: center; }
+.tour .frame { margin: 28px auto 0; max-width: 1060px; border-radius: 24px; padding: 10px; background: rgba(255, 255, 255, .6);
+  border: 1px solid #fff; box-shadow: var(--shadow); }
+.tour .frame img { border-radius: 16px; animation: fadeIn .45s ease; }
+.tour .caption { color: var(--muted); margin-top: 18px; font-size: 15px; min-height: 24px; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } }
+
+/* Steps */
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; counter-reset: step; }
+.step { position: relative; padding-top: 30px; }
+.step::before { counter-increment: step; content: counter(step); position: absolute; top: -18px; left: 24px; width: 40px;
+  height: 40px; border-radius: 13px; display: grid; place-items: center; color: #fff; font-weight: 800;
+  background: linear-gradient(135deg, var(--accent-2), var(--accent)); box-shadow: 0 10px 22px rgba(76, 141, 246, .35); }
+
+/* Split */
+.split { display: grid; grid-template-columns: 1fr 1.25fr; gap: 50px; align-items: center; }
+.split ul { list-style: none; padding: 0; margin: 22px 0 0; display: grid; gap: 12px; }
+.split li { display: flex; gap: 12px; color: var(--muted); }
+.split li b { color: var(--text); }
+.split li::before { content: "✓"; flex: none; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
+  background: rgba(47, 191, 143, .14); color: var(--success); font-weight: 800; font-size: 13px; margin-top: 1px; }
+.split .frame { border-radius: 22px; padding: 8px; background: rgba(255, 255, 255, .6); border: 1px solid #fff; box-shadow: var(--shadow); }
+.split .frame img { border-radius: 15px; }
+code { background: var(--surface-3); padding: 2px 7px; border-radius: 7px; font-size: .9em; }
+
+/* Honest note */
+.note { display: flex; gap: 20px; align-items: flex-start; padding: 30px; }
+.note .icon { flex: none; margin: 0; }
+.note h3 { margin: 0 0 8px; font-size: 19px; }
+.note p { margin: 0 0 8px; color: var(--muted); }
+
+/* FAQ */
+.faq { max-width: 820px; margin: 0 auto; display: grid; gap: 12px; }
+details { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 18px 22px;
+  box-shadow: 0 6px 20px rgba(76, 141, 246, .08); }
+summary { cursor: pointer; font-weight: 600; font-size: 16px; list-style: none; display: flex; justify-content: space-between; gap: 12px; }
+summary::after { content: "+"; color: var(--accent); font-size: 22px; line-height: 1; transition: transform .25s; }
+details[open] summary::after { transform: rotate(45deg); }
+details p { color: var(--muted); margin: 12px 0 0; }
+
+/* Download */
+.download { text-align: center; padding: 56px 30px; margin-top: 30px;
+  background: linear-gradient(135deg, #ffffff, #f1f6ff); position: relative; overflow: hidden; }
+.download::before { content: ""; position: absolute; width: 420px; height: 420px; border-radius: 50%; right: -120px; top: -160px;
+  background: radial-gradient(circle, rgba(122, 169, 255, .35), transparent 70%); }
+.download > * { position: relative; }
+.download img.logo { width: 64px; margin: 0 auto 10px; filter: drop-shadow(0 10px 18px rgba(76, 141, 246, .4));
+  animation: float 5s ease-in-out infinite; }
+.download p { color: var(--muted); max-width: 560px; margin: 0 auto 26px; }
+footer { padding: 50px 0 40px; text-align: center; color: var(--subtle); font-size: 13.5px; }
+footer a { color: var(--muted); }
+
+/* Reveal on scroll */
+.reveal { opacity: 0; transform: translateY(26px); transition: opacity .8s cubic-bezier(.2, .8, .2, 1), transform .8s cubic-bezier(.2, .8, .2, 1); }
+.reveal.in { opacity: 1; transform: none; }
+.grid .reveal:nth-child(4n+2) { transition-delay: .08s; } .grid .reveal:nth-child(4n+3) { transition-delay: .16s; }
+.grid .reveal:nth-child(4n+4) { transition-delay: .24s; }
+
+@media (max-width: 980px) {
+  .grid { grid-template-columns: repeat(2, 1fr); }
+  .split { grid-template-columns: 1fr; }
+  .links { display: none; }
+}
+@media (max-width: 640px) {
+  .grid, .steps { grid-template-columns: 1fr; }
+  .steps { gap: 34px; }
+  .hero { padding-top: 56px; }
+  .note { flex-direction: column; }
+  .strip { gap: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+  .reveal { opacity: 1; transform: none; }
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#"><img src="logo.svg" alt=""> SecureVault</a>
+    <div class="links">
+      <a href="#features">Features</a>
+      <a href="#tour">Tour</a>
+      <a href="#live">Live stream</a>
+      <a href="#faq">FAQ</a>
+    </div>
+    <a class="btn small" href="https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.7 18.3 5 18.3 5c.7 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5z"/></svg>
+      GitHub
+    </a>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="badge"><b>New</b> Antivirus scanner &amp; watch-from-anywhere live stream</span>
+    <h1>Calm, free protection<br><span class="grad">against ransomware</span></h1>
+    <p class="lead">SecureVault watches the folders you care about, catches ransomware the moment it strikes,
+      scans for malware and lets you check on your PC from your phone. Free, with every line of code on GitHub.</p>
+    <div class="cta">
+      <a class="btn primary" id="download-hero"
+         href="https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System/releases/latest/download/SecureVault-Windows.zip">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.5 10.5 4.4v7.1H3V5.5zm0 13 7.5 1.1v-7H3v5.9zm8.4 1.2L21 21V12.6h-9.6v7.1zM11.4 4.3V11.5H21V3l-9.6 1.3z"/></svg>
+        Download for Windows
+      </a>
+      <a class="btn" href="#tour">Take the tour</a>
+    </div>
+    <div class="meta"><span class="version">Version 2.1.0</span> · Windows 10 &amp; 11 · No install needed · Free</div>
+
+    <div class="shot"><img src="dashboard.png" alt="SecureVault dashboard showing protection status, stats and live activity" width="1800" height="1055"></div>
+
+    <div class="strip">
+      <span><i></i> Real-time file monitoring</span>
+      <span><i></i> Honeypot decoys</span>
+      <span><i></i> Malware scanner + quarantine</span>
+      <span><i></i> Works with Microsoft Defender</span>
+      <span><i></i> Data never leaves your PC</span>
+    </div>
+  </div>
+</header>
+
+<section id="features">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow">Features</div>
+      <h2>Everything ransomware hates</h2>
+      <p>Layered detection that spots the patterns ransomware can't hide, explained in plain language.</p>
+    </div>
+    <div class="grid">
+      <div class="card reveal"><div class="icon">👁️</div><h3>Real-time watcher</h3><p>Every create, change, delete and rename in your protected folder, compared against a SHA-256 baseline as it happens.</p></div>
+      <div class="card reveal"><div class="icon">🔒</div><h3>Ransomware heuristics</h3><p>Instant critical alerts for files renamed to <code>.locked</code>, <code>.encrypted</code> and friends, and for mass-change bursts.</p></div>
+      <div class="card reveal"><div class="icon">🧲</div><h3>Honeypot decoy</h3><p>A tempting fake file that no honest program touches. If anything modifies it, you know immediately.</p></div>
+      <div class="card reveal"><div class="icon">🦠</div><h3>Antivirus scanner</h3><p>Quick, full and custom scans with signatures, heuristics, YARA and the Microsoft Defender engine.</p></div>
+      <div class="card reveal"><div class="icon">⚡</div><h3>On-access scanning</h3><p>New files are scanned the moment they land, so a disguised <code>invoice.pdf.exe</code> never goes unnoticed.</p></div>
+      <div class="card reveal"><div class="icon">🗄️</div><h3>Quarantine</h3><p>Threats are neutralized so they can't run. Restore anything you trust with one click.</p></div>
+      <div class="card reveal"><div class="icon">📡</div><h3>Live streaming</h3><p>Watch status, alerts and system load from any browser: on your Wi-Fi or anywhere in the world.</p></div>
+      <div class="card reveal"><div class="icon">📊</div><h3>Evidence reports</h3><p>Export a clean HTML report with timestamps, severity and file paths for every event.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="tour" class="tour">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow">Tour</div>
+      <h2>Beautifully simple</h2>
+      <p>A soft, uncluttered dashboard with gentle animations that tell you exactly what's going on.</p>
+    </div>
+    <div class="tabs reveal" id="tabs">
+      <button class="active" data-img="dashboard.png" data-cap="Protected: the shield ring orbits while real-time monitoring keeps watch.">Protection</button>
+      <button data-img="threat.png" data-cap="Under attack: files renamed to .locked and the honeypot touched. The ring turns red within seconds.">Threat</button>
+      <button data-img="antivirus.png" data-cap="Antivirus: every finding explains why it was flagged, with one-click quarantine.">Antivirus</button>
+      <button data-img="quarantine.png" data-cap="Quarantine: neutralized files that can't run, ready to restore or delete.">Quarantine</button>
+      <button data-img="live-stream.png" data-cap="Live stream: the same protection in any browser, on any device.">Live view</button>
+    </div>
+    <div class="frame reveal"><img id="tour-img" src="dashboard.png" alt="SecureVault screenshot"></div>
+    <div class="caption" id="tour-cap">Protected: the shield ring orbits while real-time monitoring keeps watch.</div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow">Get started</div>
+      <h2>Protected in three steps</h2>
+    </div>
+    <div class="steps">
+      <div class="card step reveal"><h3>Pick a folder</h3><p>Choose the folder you want to protect, like Documents or your projects.</p></div>
+      <div class="card step reveal"><h3>Create a baseline</h3><p>SecureVault fingerprints every file and plants a honeypot decoy next to them.</p></div>
+      <div class="card step reveal"><h3>Switch on protection</h3><p>Flip the real-time monitor on. That's it: SecureVault keeps watch, even from the tray.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="live">
+  <div class="wrap split">
+    <div class="reveal">
+      <div class="eyebrow">Live stream</div>
+      <h2>Check on your PC from anywhere</h2>
+      <p style="color:var(--muted)">Click <b>Go live</b> and SecureVault streams its status, alerts and a live CPU chart to a private web page.</p>
+      <ul>
+        <li><span><b>This PC, your Wi-Fi or the internet.</b> Internet sharing uses a secure Cloudflare tunnel; no account or router setup needed.</span></li>
+        <li><span><b>Private by design.</b> A secret link that changes every time, read-only for viewers, revoked the moment you stop.</span></li>
+        <li><span><b>Made for phones.</b> A responsive viewer with instant threat banners.</span></li>
+      </ul>
+    </div>
+    <div class="frame reveal"><img src="live-stream.png" alt="SecureVault Live web viewer"></div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="card note reveal">
+      <div class="icon">🤝</div>
+      <div>
+        <h3>Honest about what it is</h3>
+        <p>SecureVault is not a replacement for a full commercial antivirus suite: those block malware before it runs using kernel drivers and cloud intelligence.
+          Windows already includes an excellent free one, <b>Microsoft Defender</b>, so keep it on.</p>
+        <p>SecureVault adds what Defender doesn't focus on: ransomware-specific monitoring, honeypots, clear explanations and a calm interface,
+          and it uses Defender as a second engine for deep scans.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow">FAQ</div>
+      <h2>Questions, answered</h2>
+    </div>
+    <div class="faq">
+      <details class="reveal"><summary>Is SecureVault really free?</summary>
+        <p>Yes. There are no ads, no account and no subscriptions, and the full source code is public on GitHub.</p></details>
+      <details class="reveal"><summary>Windows says "Windows protected your PC". Is that normal?</summary>
+        <p>Yes. SmartScreen shows that for new apps that aren't code-signed with a paid certificate. Click <b>More info</b> and then <b>Run anyway</b>.
+          You can also build the app yourself from the source code with one command.</p></details>
+      <details class="reveal"><summary>How do I install it?</summary>
+        <p>Download the zip, extract it anywhere (for example <code>Documents\SecureVault</code>) and run <code>SecureVault.exe</code>. No installer, no admin rights.
+          Your settings, logs and quarantine live in <code>%LOCALAPPDATA%\SecureVault</code>.</p></details>
+      <details class="reveal"><summary>Does my data leave my computer?</summary>
+        <p>No. Everything runs locally. The only exception is the live stream, and only when you start it: viewers with your private link can see its status page.</p></details>
+      <details class="reveal"><summary>How do I watch from my phone?</summary>
+        <p>Click <b>Go live</b>, then turn on <b>Allow devices on my network</b> (same Wi-Fi) or <b>Share over the internet</b> (anywhere).
+          Internet sharing needs Cloudflare's free tool: <code>winget install Cloudflare.cloudflared</code>.</p></details>
+      <details class="reveal"><summary>Can I see the code?</summary>
+        <p>Of course. Everything, including the tests, is on <a href="https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System" style="color:var(--accent-deep)">GitHub</a>.</p></details>
+    </div>
+  </div>
+</section>
+
+<section id="download">
+  <div class="wrap">
+    <div class="card download reveal">
+      <img class="logo" src="logo.svg" alt="">
+      <h2>Ready when you are</h2>
+      <p>Download SecureVault for Windows 10 and 11. Extract, run, protected.</p>
+      <div class="cta">
+        <a class="btn primary"
+           href="https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System/releases/latest/download/SecureVault-Windows.zip">
+          Download for Windows
+        </a>
+        <a class="btn" href="https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System/releases" target="_blank" rel="noopener">All releases</a>
+      </div>
+      <div class="meta"><span class="version">Version 2.1.0</span> · <span id="size">≈ 35 MB</span></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    Made with 🛡️ by Kiran Gautham ·
+    <a href="https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System" target="_blank" rel="noopener">Source on GitHub</a>
+  </div>
+</footer>
+
+<script>
+// Reveal sections as they scroll into view
+const io = new IntersectionObserver(entries => entries.forEach(e => {
+  if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+}), { threshold: 0.12 });
+document.querySelectorAll(".reveal").forEach(el => io.observe(el));
+
+// Screenshot tour
+const tabs = document.getElementById("tabs");
+tabs.addEventListener("click", e => {
+  const btn = e.target.closest("button");
+  if (!btn) return;
+  [...tabs.children].forEach(b => b.classList.toggle("active", b === btn));
+  const img = document.getElementById("tour-img");
+  img.style.animation = "none"; void img.offsetWidth; img.style.animation = "";
+  img.src = btn.dataset.img;
+  document.getElementById("tour-cap").textContent = btn.dataset.cap;
+});
+
+// Show the latest release version and size when GitHub is reachable
+fetch("https://api.github.com/repos/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System/releases/latest")
+  .then(r => r.ok ? r.json() : null)
+  .then(rel => {
+    if (!rel) return;
+    document.querySelectorAll(".version").forEach(el => el.textContent = "Version " + rel.tag_name.replace(/^v/, ""));
+    const asset = (rel.assets || []).find(a => a.name === "SecureVault-Windows.zip");
+    if (asset) document.getElementById("size").textContent = (asset.size / 1048576).toFixed(0) + " MB";
+  })
+  .catch(() => {});
+</script>
+</body>
+</html>

@@ -5,14 +5,22 @@ A tiny standard-library HTTP server pushes updates with Server-Sent Events.
 The viewer is read-only and every request must carry the random access token
 that is generated each time streaming starts, so stopping the stream revokes
 every link that was shared.
+
+For viewing from anywhere, ``start_public`` opens a Cloudflare quick tunnel
+(``cloudflared``, no account needed) to the local server. Quick tunnels do not
+reliably pass Server-Sent Events, so the viewer falls back to polling
+``/api/poll`` when the live connection does not come up.
 """
 import os
+import re
 import hmac
 import json
 import time
 import queue
 import socket
 import secrets
+import shutil
+import subprocess
 import sys
 import threading
 from collections import deque
@@ -21,7 +29,13 @@ from urllib.parse import urlparse, parse_qs
 
 import psutil
 
-WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+TUNNEL_URL = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
+CLOUDFLARED_PATHS = [
+    r"C:\Program Files (x86)\cloudflared\cloudflared.exe",
+    r"C:\Program Files\cloudflared\cloudflared.exe",
+    os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WinGet", "Links", "cloudflared.exe"),
+]
+WEB_DIR = os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))), "web")
 DEFAULT_PORT = 8765
 
 SECURITY_HEADERS = {
@@ -48,6 +62,11 @@ def event_payload(event):
         "path": event.path,
         "ts": event.timestamp,
     }
+
+
+def find_cloudflared():
+    found = shutil.which("cloudflared")
+    return found or next((p for p in CLOUDFLARED_PATHS if os.path.isfile(p)), None)
 
 
 def local_ip():
@@ -86,6 +105,10 @@ class LiveStreamServer:
         self._metrics = deque(maxlen=60)
         self._state = {}
         self._stop = threading.Event()
+        self._seq = 0
+        self._pollers = {}        # polling viewer id -> last seen
+        self._tunnel = None
+        self.public_base = None
 
     # ----------------------------------------------------------- control
 
@@ -101,9 +124,17 @@ class LiveStreamServer:
         return f"http://{host}:{self.port}/?token={self.token}"
 
     @property
+    def public_url(self):
+        if not (self.running and self.public_base):
+            return None
+        return f"{self.public_base}/?token={self.token}"
+
+    @property
     def viewers(self):
+        now = time.time()
         with self._lock:
-            return len(self._clients)
+            pollers = sum(1 for seen in self._pollers.values() if now - seen < 10)
+            return len(self._clients) + pollers
 
     def start(self, lan=False):
         """Start serving and return the shareable URL."""
@@ -129,6 +160,7 @@ class LiveStreamServer:
         return self.url
 
     def stop(self):
+        self.stop_public()
         httpd, self._httpd = self._httpd, None
         if httpd is None:
             return
@@ -145,29 +177,106 @@ class LiveStreamServer:
         httpd.server_close()
         self.token = None
 
+    # ------------------------------------------------------- public tunnel
+
+    @staticmethod
+    def tunnel_available():
+        return find_cloudflared() is not None
+
+    def start_public(self, timeout=45, attempts=2):
+        """Expose the running stream on the internet. Returns the public viewer URL.
+
+        Free quick tunnels occasionally fail to come up, so one retry is built in.
+        """
+        if not self.running:
+            raise RuntimeError("Start streaming first")
+        exe = find_cloudflared()
+        if not exe:
+            raise RuntimeError("cloudflared is not installed (winget install Cloudflare.cloudflared)")
+        reason = "no response from Cloudflare"
+        for _ in range(attempts):
+            url, reason = self._open_tunnel(exe, timeout)
+            if url:
+                return url
+        raise RuntimeError(f"Cloudflare tunnel did not start: {reason}")
+
+    def _open_tunnel(self, exe, timeout):
+        self.stop_public()
+        proc = subprocess.Popen(
+            [exe, "tunnel", "--no-autoupdate", "--url", f"http://127.0.0.1:{self.port}"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        self._tunnel = proc
+        done = threading.Event()
+        errors = deque(maxlen=3)
+
+        def read_output():
+            for line in proc.stdout:  # keep draining so cloudflared never blocks on a full pipe
+                m = TUNNEL_URL.search(line)
+                if m and not done.is_set():
+                    self.public_base = m.group(0)
+                    done.set()
+                elif " ERR " in line or "error" in line.lower():
+                    errors.append(line.split("ERR", 1)[-1].strip()[:160])
+            done.set()  # cloudflared exited: stop waiting
+
+        threading.Thread(target=read_output, name="securevault-tunnel", daemon=True).start()
+        done.wait(timeout)
+        if self.public_base and proc.poll() is None and self._tunnel is proc:
+            return self.public_url, None
+        if self._tunnel is proc:
+            self.stop_public()
+        return None, (errors[-1] if errors else "check your internet connection")
+
+    def stop_public(self):
+        proc, self._tunnel = self._tunnel, None
+        self.public_base = None
+        if proc and proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
     # ---------------------------------------------------------- publishing
 
-    def publish(self, event):
+    def _payload(self, event):
+        self._seq += 1
         payload = event_payload(event)
-        self._history.append(payload)
+        payload["id"] = self._seq
+        return payload
+
+    def publish(self, event):
+        with self._lock:
+            payload = self._payload(event)
+            self._history.append(payload)
         self._broadcast("event", payload)
 
     def seed(self, events):
         """Pre-fill the history new viewers receive when they connect."""
-        self._history.clear()
-        self._history.extend(event_payload(e) for e in events)
+        with self._lock:
+            self._history.clear()
+            self._history.extend(self._payload(e) for e in events)
 
     def update_state(self, **state):
         self._state.update(state)
         self._broadcast("state", self._state)
 
     def snapshot(self):
-        return {
-            "state": self._state,
-            "events": list(self._history),
-            "metrics": list(self._metrics),
-            "viewers": self.viewers,
-        }
+        with self._lock:
+            events, metrics = list(self._history), list(self._metrics)
+        return {"state": self._state, "events": events, "metrics": metrics, "viewers": self.viewers}
+
+    def poll(self, since, client):
+        """Updates for viewers that cannot hold a live connection open."""
+        with self._lock:
+            if client:
+                self._pollers[client[:40]] = time.time()
+                if len(self._pollers) > 500:
+                    self._pollers.clear()
+            events = [e for e in self._history if e["id"] > since]
+            metrics = list(self._metrics)
+        return {"state": self._state, "events": events, "metrics": metrics, "viewers": self.viewers}
 
     def _broadcast(self, name, data):
         message = f"event: {name}\ndata: {json.dumps(data)}\n\n".encode("utf-8")
@@ -192,7 +301,8 @@ class LiveStreamServer:
         psutil.cpu_percent(None)
         while not self._stop.wait(1.0):
             sample = {"cpu": psutil.cpu_percent(None), "mem": psutil.virtual_memory().percent, "ts": time.time()}
-            self._metrics.append(sample)
+            with self._lock:
+                self._metrics.append(sample)
             self._broadcast("metrics", sample)
 
 
@@ -219,7 +329,8 @@ def _make_handler(live):
 
         def do_GET(self):
             url = urlparse(self.path)
-            token = parse_qs(url.query).get("token", [""])[0]
+            query = parse_qs(url.query)
+            token = query.get("token", [""])[0]
             if not (live.token and hmac.compare_digest(token, live.token)):
                 self._send(403, DENIED_PAGE, "text/html; charset=utf-8")
                 return
@@ -228,6 +339,13 @@ def _make_handler(live):
                     self._send(200, f.read(), "text/html; charset=utf-8")
             elif url.path == "/api/snapshot":
                 self._send(200, json.dumps(live.snapshot()).encode("utf-8"), "application/json")
+            elif url.path == "/api/poll":
+                try:
+                    since = int(query.get("since", ["0"])[0])
+                except ValueError:
+                    since = 0
+                body = live.poll(since, query.get("client", [""])[0])
+                self._send(200, json.dumps(body).encode("utf-8"), "application/json")
             elif url.path == "/stream":
                 self._stream()
             else:

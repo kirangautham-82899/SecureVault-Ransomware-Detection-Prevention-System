@@ -15,10 +15,12 @@
 ![Windows](https://img.shields.io/badge/Platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)
 ![Live](https://img.shields.io/badge/Live%20Stream-SSE-EF5B6E?style=for-the-badge)
 ![Antivirus](https://img.shields.io/badge/Antivirus-Built%20in-F2A33A?style=for-the-badge)
-![Tests](https://img.shields.io/badge/Tests-40%20passing-22C55E?style=for-the-badge)
-![Version](https://img.shields.io/badge/Version-2.0.0-38BDF8?style=for-the-badge)
+![Tests](https://img.shields.io/badge/Tests-42%20passing-22C55E?style=for-the-badge)
+[![Release](https://img.shields.io/github/v/release/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System?style=for-the-badge&color=4C8DF6&label=Download)](https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System/releases/latest)
 
-[**Features**](#-features) · [**Screenshots**](#-screenshots) · [**Antivirus**](#-antivirus) · [**Live Stream**](#-live-streaming) · [**Quick Start**](#-quick-start) · [**How It Works**](#-how-it-works) · [**Usage**](#-usage) · [**Project Structure**](#-project-structure)
+### [🌐 Website](https://kirangautham-82899.github.io/SecureVault-Ransomware-Detection-Prevention-System/) · [⬇️ Download for Windows](https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System/releases/latest/download/SecureVault-Windows.zip)
+
+[**Features**](#-features) · [**Screenshots**](#-screenshots) · [**Antivirus**](#-antivirus) · [**Live Stream**](#-live-streaming) · [**Download**](#%EF%B8%8F-download) · [**Quick Start**](#-quick-start-from-source) · [**How It Works**](#-how-it-works) · [**Usage**](#-usage) · [**Project Structure**](#-project-structure)
 
 <br/>
 
@@ -210,8 +212,10 @@ python main.py --scan "D:\" --quarantine       # scan and quarantine malicious f
 
 **From the dashboard**
 1. Click **Go live** in the header.
-2. Optionally switch on **Allow devices on my network** to watch from your phone or another PC on the same Wi-Fi.
-3. Click **Start streaming**, then **Copy** or **Open** the private link.
+2. Choose who can watch:
+   - **Allow devices on my network**: your phone or another PC on the same Wi-Fi.
+   - **Share over the internet**: anywhere in the world, through a secure [Cloudflare quick tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/). No account or router setup needed, just install Cloudflare's free tool once: `winget install Cloudflare.cloudflared`
+3. Click **Start streaming**, then **Copy** or **Open** the private link (`https://….trycloudflare.com/?token=…` when shared over the internet).
 
 The header badge shows `Live · N watching` while the stream runs.
 
@@ -222,17 +226,32 @@ python main.py --stream "C:\Users\me\Documents"
 
 # Also allow devices on your network
 python main.py --stream "C:\Users\me\Documents" --lan
+
+# Share over the internet (Cloudflare tunnel)
+python main.py --stream "C:\Users\me\Documents" --public
 ```
 Headless mode runs the file and process monitors and prints the link. It's also option **8** in the CLI menu.
 
 > [!IMPORTANT]
-> **Privacy by design.** The viewer is **read-only**: nobody can change settings through it. Every request needs a **random access token**, and a new token is generated each time streaming starts, so stopping the stream revokes every link you've shared. The stream binds to `127.0.0.1` unless you explicitly allow your local network.
+> **Privacy by design.** The viewer is **read-only**: nobody can change settings through it. Every request needs a **random access token**, and a new token is generated each time streaming starts, so stopping the stream revokes every link you've shared. The stream binds to `127.0.0.1` unless you explicitly allow your local network, and the internet tunnel only runs while you have it switched on.
 
-**How it works:** a small built-in web server (Python standard library only) pushes updates over **Server-Sent Events**. Viewers reconnect automatically if the connection drops, and stalled viewers are disconnected so they never slow down detection.
+**How it works:** a small built-in web server (Python standard library only) pushes updates over **Server-Sent Events**. Viewers reconnect automatically if the connection drops, and stalled viewers are disconnected so they never slow down detection. Through the internet tunnel, where live connections aren't reliable, the viewer switches to fetching updates every 2 seconds.
 
 ---
 
-## 🚀 Quick Start
+## ⬇️ Download
+
+**[Download SecureVault for Windows](https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System/releases/latest/download/SecureVault-Windows.zip)** (Windows 10 & 11), or visit the **[website](https://kirangautham-82899.github.io/SecureVault-Ransomware-Detection-Prevention-System/)**.
+
+1. Extract the zip anywhere, for example `Documents\SecureVault`.
+2. Run **`SecureVault.exe`**. No installer, Python or admin rights needed.
+3. If Windows SmartScreen says *"Windows protected your PC"*, click **More info → Run anyway**. It appears because the app isn't code-signed with a paid certificate.
+
+Your settings, logs, baseline and quarantine are stored in `%LOCALAPPDATA%\SecureVault`.
+
+---
+
+## 🚀 Quick Start (from source)
 
 **Requirements:** Python 3.8+ on Windows (the engine also runs on Linux/macOS; sound alerts are Windows-only).
 
@@ -250,6 +269,18 @@ python main.py --gui
 
 > [!TIP]
 > Prefer the terminal? Run `python main.py` for the interactive command-line menu.
+
+### Build the Windows app yourself
+```bash
+pip install -r requirements.txt pyinstaller
+python packaging/build.py
+```
+This creates `dist/SecureVault/SecureVault.exe` and `dist/SecureVault-Windows.zip`.
+
+### Releases and website
+- **Releases are automated.** Pushing a version tag (`git tag v2.1.0 && git push origin v2.1.0`) runs [`.github/workflows/release.yml`](.github/workflows/release.yml) on GitHub's Windows servers: it runs the tests, builds the app, smoke-tests it and publishes `SecureVault-Windows.zip` as a GitHub Release.
+- **Tests run on every push** via [`.github/workflows/tests.yml`](.github/workflows/tests.yml).
+- **The website** is `docs/index.html`, served by GitHub Pages from the `docs/` folder of `main`. Its Download button always points at the latest release.
 
 ---
 
@@ -313,7 +344,7 @@ Noise such as temporary files, logs, `.git`, `node_modules` and `__pycache__` is
 ### Command-line menu
 
 ```text
-===== SecureVault v2.0.0: Ransomware Detection System =====
+===== SecureVault v2.1.0: Ransomware Detection System =====
 1. Create Baseline Hashes
 2. Check for Changes (Manual Scan)
 3. Create Honeypot File
@@ -367,7 +398,11 @@ SecureVault/
 │   ├── test_main.py     # Engine unit tests
 │   ├── test_scanner.py  # Antivirus engine and quarantine tests
 │   └── test_stream.py   # Live stream tests
-├── docs/                # Logo and screenshots
+├── packaging/
+│   ├── build.py         # Builds SecureVault.exe and the release zip (PyInstaller)
+│   └── launcher.py      # Entry point of the packaged app
+├── docs/                # Website (GitHub Pages), logo and screenshots
+├── .github/workflows/   # Tests on every push; release builds on version tags
 └── requirements.txt
 ```
 
@@ -398,7 +433,8 @@ The suite covers exclusions, hashing, baseline creation, integrity scans, honeyp
 | :--- | :--- |
 | Language | Python 3 |
 | GUI | PyQt6 (custom-painted, animated widgets) |
-| Live streaming | `http.server` + Server-Sent Events, vanilla HTML/CSS/JS |
+| Live streaming | `http.server` + Server-Sent Events, vanilla HTML/CSS/JS, Cloudflare quick tunnels |
+| Packaging & deployment | PyInstaller, GitHub Actions, GitHub Releases, GitHub Pages |
 | File monitoring | [watchdog](https://github.com/gorakhargosh/watchdog) |
 | Process metrics | [psutil](https://github.com/giampaolo/psutil) |
 | Hashing | SHA-256 (`hashlib`) |

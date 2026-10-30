@@ -29,13 +29,15 @@ import time
 from dataclasses import dataclass, field, asdict
 
 from main import (
-    APP_DIR, RANSOMWARE_EXTENSIONS, emit, normalize_path, INFO, SUCCESS, WARNING, CRITICAL,
+    APP_DIR, RESOURCE_DIR, RANSOMWARE_EXTENSIONS, emit, normalize_path, INFO, SUCCESS, WARNING, CRITICAL,
 )
 
-SIGNATURE_DIR = os.path.join(APP_DIR, "signatures")
+SIGNATURE_DIR = os.path.join(RESOURCE_DIR, "signatures")       # shipped with the app
+USER_SIGNATURE_DIR = os.path.join(APP_DIR, "signatures")       # imported by the user
 HASH_SIGNATURES = os.path.join(SIGNATURE_DIR, "hashes.txt")
-USER_SIGNATURES = os.path.join(SIGNATURE_DIR, "user_hashes.txt")
+USER_SIGNATURES = os.path.join(USER_SIGNATURE_DIR, "user_hashes.txt")
 YARA_DIR = os.path.join(SIGNATURE_DIR, "yara")
+USER_YARA_DIR = os.path.join(USER_SIGNATURE_DIR, "yara")
 QUARANTINE_DIR = os.path.join(APP_DIR, "quarantine")
 
 CLEAN, SUSPICIOUS, MALICIOUS = "clean", "suspicious", "malicious"
@@ -176,7 +178,10 @@ class Scanner:
         self.yara_rules = None
         try:
             import yara
-            files = {os.path.basename(p): p for p in glob.glob(os.path.join(self.yara_dir, "*.yar*"))}
+            dirs = [self.yara_dir]
+            if self.yara_dir == YARA_DIR and USER_YARA_DIR != YARA_DIR:
+                dirs.append(USER_YARA_DIR)
+            files = {os.path.basename(p): p for d in dirs for p in glob.glob(os.path.join(d, "*.yar*"))}
             if files:
                 self.yara_rules = yara.compile(filepaths=files)
         except Exception:  # yara-python not installed or rules invalid: skip this layer

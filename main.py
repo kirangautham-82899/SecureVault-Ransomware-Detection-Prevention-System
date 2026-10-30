@@ -22,10 +22,20 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 APP_NAME = "SecureVault"
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.1.0"
 
-# Runtime data lives next to the application, not in whatever folder it was launched from
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
+# Bundled, read-only resources (web viewer, built-in signatures). In the packaged
+# Windows app PyInstaller unpacks these into sys._MEIPASS.
+FROZEN = getattr(sys, "frozen", False)
+RESOURCE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+
+# Writable runtime data: next to the code when run from source (not whatever folder it
+# was launched from), and in %LOCALAPPDATA%\SecureVault for the packaged app.
+if FROZEN:
+    APP_DIR = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "SecureVault")
+    os.makedirs(APP_DIR, exist_ok=True)
+else:
+    APP_DIR = RESOURCE_DIR
 HASH_DB_FILE = os.path.join(APP_DIR, "hash_db.json")
 LOG_FILE = os.path.join(APP_DIR, "suspicious_activity.log")
 HONEYPOT_FILE = "honeypot_fake_sensitive.txt"
@@ -518,7 +528,7 @@ def launch_gui():
     run_gui()
 
 
-def run_live_stream(folder, lan=False):
+def run_live_stream(folder, lan=False, public=False):
     """Headless mode: monitor ``folder`` and stream everything to the web viewer."""
     from stream import LiveStreamServer
 
@@ -550,6 +560,12 @@ def run_live_stream(folder, lan=False):
     on_access = OnAccessScanner(Scanner(), sink)
     url = server.start(lan=lan)
     push_state()
+    if public:
+        print("🌍 Opening a public Cloudflare tunnel...")
+        try:
+            url = server.start_public()
+        except RuntimeError as e:
+            print(f"   Could not open the public tunnel: {e}")
     print(f"\n📡 Live stream running: {url}")
     print("   Anyone with this link can watch. Press Ctrl+C to stop.\n")
     threading.Thread(target=monitor_processes_sustained,
@@ -666,6 +682,7 @@ if __name__ == "__main__":
         run_antivirus_scan(rest or None, quarantine="--quarantine" in args)
     elif "--stream" in args:
         rest = [a for a in args if not a.startswith("--")]
-        run_live_stream(os.path.abspath(rest[0]) if rest else os.getcwd(), lan="--lan" in args)
+        run_live_stream(os.path.abspath(rest[0]) if rest else os.getcwd(), lan="--lan" in args,
+                        public="--public" in args)
     else:
         main_menu()

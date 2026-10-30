@@ -203,6 +203,30 @@ class StreamDialog(QDialog):
         lan_layout.addWidget(self.lan_switch)
         layout.addWidget(lan_card)
 
+        net_card = QFrame()
+        net_card.setObjectName("Card")
+        net_layout = QHBoxLayout(net_card)
+        net_layout.setContentsMargins(16, 12, 16, 12)
+        net_text = QVBoxLayout()
+        net_text.setSpacing(1)
+        net_title = QLabel("Share over the internet")
+        net_title.setStyleSheet("font-weight: 600;")
+        available = self.stream.tunnel_available()
+        net_sub = QLabel("Watch from anywhere through a secure Cloudflare tunnel (no account needed)" if available
+                         else "Needs Cloudflare's free tool: winget install Cloudflare.cloudflared")
+        net_sub.setObjectName("Muted")
+        net_sub.setStyleSheet("font-size: 11px;")
+        net_sub.setWordWrap(True)
+        net_text.addWidget(net_title)
+        net_text.addWidget(net_sub)
+        self.net_switch = ToggleSwitch()
+        self.net_switch.setEnabled(available)
+        self.net_switch.set_checked_silently(bool(self.stream.public_base) or window.tunnel_starting)
+        self.net_switch.toggled.connect(self._net_changed)
+        net_layout.addLayout(net_text, 1)
+        net_layout.addWidget(self.net_switch)
+        layout.addWidget(net_card)
+
         self.url = QLineEdit()
         self.url.setReadOnly(True)
         self.url.setPlaceholderText("Start streaming to get a private link")
@@ -211,7 +235,7 @@ class StreamDialog(QDialog):
         self.copy_btn = QPushButton("Copy")
         self.copy_btn.clicked.connect(self._copy)
         self.open_btn = QPushButton("Open")
-        self.open_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self.stream.url)))
+        self.open_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self._current_url())))
         url_row.addWidget(self.url, 1)
         url_row.addWidget(self.copy_btn)
         url_row.addWidget(self.open_btn)
@@ -235,27 +259,48 @@ class StreamDialog(QDialog):
         self._timer.start(1000)
         self.refresh()
 
+    def _current_url(self):
+        return self.stream.public_url or self.stream.url or ""
+
+    def _start(self):
+        self.window_.start_stream(self.lan_switch.isChecked())
+        if self.net_switch.isChecked() and self.stream.running:
+            self.window_.start_tunnel()
+
     def _toggle(self):
         if self.stream.running:
             self.window_.stop_stream()
+            self.net_switch.set_checked_silently(False)
         else:
-            self.window_.start_stream(self.lan_switch.isChecked())
+            self._start()
         self.refresh()
 
     def _lan_changed(self, checked):
         if self.stream.running:  # The bind address changes, so restart with a new link
-            self.window_.start_stream(checked)
+            self._start()
+        self.refresh()
+
+    def _net_changed(self, checked):
+        if checked:
+            if self.stream.running:
+                self.window_.start_tunnel()
+            else:
+                self._start()
+        else:
+            self.window_.stop_tunnel()
         self.refresh()
 
     def _copy(self):
-        QGuiApplication.clipboard().setText(self.stream.url or "")
+        QGuiApplication.clipboard().setText(self._current_url())
         self.copy_btn.setText("Copied ✓")
         QTimer.singleShot(1500, lambda: self.copy_btn.setText("Copy"))
 
     def refresh(self):
         running = self.stream.running
-        if self.url.text() != (self.stream.url or ""):
-            self.url.setText(self.stream.url or "")
+        if self.net_switch.isChecked() and not (self.stream.public_base or self.window_.tunnel_starting):
+            self.net_switch.set_checked_silently(False)  # the tunnel failed or stopped
+        if self.url.text() != self._current_url():
+            self.url.setText(self._current_url())
             self.url.setCursorPosition(0)
         self.copy_btn.setEnabled(running)
         self.open_btn.setEnabled(running)
@@ -265,8 +310,13 @@ class StreamDialog(QDialog):
         self.toggle_btn.style().polish(self.toggle_btn)
         if running:
             n = self.stream.viewers
-            where = "devices on your network" if self.stream.lan else "this computer only"
-            self.info.setText(f"🔴  Live · {n} watching · visible to {where}.\n"
+            if self.stream.public_base:
+                where = "anyone on the internet who has the link"
+            elif self.window_.tunnel_starting:
+                where = "this computer for now. Opening the internet tunnel…"
+            else:
+                where = "devices on your network" if self.stream.lan else "this computer only"
+            self.info.setText(f"🔴  Live · {n} watching · visible to {where}\n"
                               "Anyone with the link can watch. Stopping the stream revokes it.")
         else:
             self.info.setText("The viewer is read-only. Each time you start streaming, a new private link is created.")
@@ -294,6 +344,7 @@ class SecureVaultGUI(QMainWindow):
         self._running = {}       # task key -> token of the run currently owning it
         self._stop_events = {}   # task key -> threading.Event for long-running monitors
         self.stream = LiveStreamServer()
+        self.tunnel_starting = False
         self.scanner = Scanner()
         self.on_access_enabled = True
 
@@ -644,6 +695,11 @@ class SecureVaultGUI(QMainWindow):
         elif key == "honeypot":
             self.buttons["honeypot"].set_busy(False)
             self.refresh_honeypot()
+        elif key == "tunnel":
+            self.tunnel_starting = False
+            if result:
+                self.on_event(emit(self._silent, SUCCESS, "Public live link is ready (Cloudflare tunnel)"))
+            self.refresh_stream_pill()
         elif key == "av_scan":
             self.av_page.on_scan_done(result)
         elif key == "load_baseline":
@@ -822,14 +878,31 @@ class SecureVaultGUI(QMainWindow):
         return url
 
     def stop_stream(self):
+        self._running.pop("tunnel", None)
+        self.tunnel_starting = False
         self.stream.stop()
         self.refresh_stream_pill()
         self.on_event(emit(self._silent, INFO, "Live stream stopped"))
 
+    def start_tunnel(self):
+        if self.tunnel_starting or not self.stream.running:
+            return
+        self.tunnel_starting = True
+        self.run_task("tunnel", self.stream.start_public)
+
+    def stop_tunnel(self):
+        if self.stream.public_base:
+            self.stream.stop_public()
+            self.on_event(emit(self._silent, INFO, "Public live link closed"))
+        self._running.pop("tunnel", None)
+        self.tunnel_starting = False
+        self.refresh_stream_pill()
+
     def refresh_stream_pill(self):
         if self.stream.running:
             n = self.stream.viewers
-            self.live_pill.set_state(f"Live · {n} watching", theme.ACCENT_DEEP, pulse=True,
+            scope = "public · " if self.stream.public_base else ""
+            self.live_pill.set_state(f"Live · {scope}{n} watching", theme.ACCENT_DEEP, pulse=True,
                                      tooltip="Streaming to the web. Click to manage.")
         else:
             self.live_pill.set_state("Go live", theme.MUTED, tooltip="Stream SecureVault to a browser")

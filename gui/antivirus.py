@@ -16,6 +16,7 @@ from main import emit, INFO, SUCCESS, WARNING
 from scanner import (
     Finding, MALICIOUS, quick_scan_targets, full_scan_targets, quarantine_file,
     list_quarantine, restore_quarantined, delete_quarantined, import_signatures,
+    USER_SIGNATURE_DIR, USER_YARA_DIR,
 )
 from gui import theme
 from gui.widgets import Card, StatChip, ToggleRow, ScanRing, paint_shield
@@ -287,8 +288,7 @@ class AntivirusPage(QWidget):
         menu = QMenu(self)
         menu.addAction("Import hash signatures…", self.import_signatures)
         menu.addAction("Reload signatures and rules", self.reload_signatures)
-        menu.addAction("Open signatures folder", lambda: QDesktopServices.openUrl(
-            QUrl.fromLocalFile(os.path.dirname(self.scanner.signature_files[0]))))
+        menu.addAction("Open signatures folder", self.open_signature_folder)
         more.setMenu(menu)
         footer.addWidget(self.engine_info, 1)
         footer.addWidget(more)
@@ -322,6 +322,10 @@ class AntivirusPage(QWidget):
     def set_on_access(self, enabled):
         self.w.on_access_enabled = enabled
         self.refresh_engines()
+
+    def open_signature_folder(self):
+        os.makedirs(USER_YARA_DIR, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(USER_SIGNATURE_DIR))
 
     def reload_signatures(self):
         self.scanner.reload()

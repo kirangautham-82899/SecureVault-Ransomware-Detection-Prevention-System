@@ -1,0 +1,65 @@
+name: Release
+
+# Push a version tag (e.g. `git tag v2.1.0 && git push origin v2.1.0`) to build
+# SecureVault.exe and publish it as a GitHub Release. The website's Download
+# button always points at the newest release's SecureVault-Windows.zip.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build, e.g. v2.1.0"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest pyinstaller
+      - name: Run tests
+        run: python -m pytest -q tests
+      - name: Build SecureVault.exe
+        run: python packaging/build.py
+      - name: Smoke-test the build
+        shell: pwsh
+        run: |
+          $p = Start-Process dist\SecureVault\SecureVault.exe -PassThru
+          Start-Sleep 10
+          if ($p.HasExited) { throw "SecureVault.exe exited early with code $($p.ExitCode)" }
+          Stop-Process -Id $p.Id -Force
+      - name: Publish release
+        shell: pwsh
+        run: |
+          $notes = @"
+          ## SecureVault $env:TAG for Windows
+
+          **Download:** ``SecureVault-Windows.zip`` below → extract → run ``SecureVault.exe``. No installer or admin rights needed.
+
+          Windows SmartScreen may say *"Windows protected your PC"* because the app isn't code-signed. Click **More info → Run anyway**.
+
+          Includes ransomware monitoring, honeypots, the antivirus scanner with quarantine, and live streaming (Wi-Fi or internet).
+          Keep Microsoft Defender switched on; SecureVault works alongside it.
+
+          SHA-256: ``$((Get-FileHash dist\SecureVault-Windows.zip -Algorithm SHA256).Hash.ToLower())``
+          "@
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:TAG dist\SecureVault-Windows.zip --clobber
+          } else {
+            gh release create $env:TAG dist\SecureVault-Windows.zip --title "SecureVault $env:TAG" --notes $notes --latest
+          }
