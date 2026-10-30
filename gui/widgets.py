@@ -294,6 +294,32 @@ class StatChip(QFrame):
 
 # ------------------------------------------------------------ controls
 
+class ToggleRow(QWidget):
+    def __init__(self, glyph, title, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 2, 0, 2)
+        layout.setSpacing(12)
+        icon = QLabel(glyph)
+        icon.setFixedSize(38, 38)
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon.setStyleSheet(f"background: {theme.ACCENT_SOFT}; border-radius: 12px; font-size: 16px;")
+        text = QVBoxLayout()
+        text.setSpacing(1)
+        t = QLabel(title)
+        t.setStyleSheet("font-weight: 600;")
+        self.state = QLabel("Off")
+        self.state.setObjectName("Muted")
+        self.state.setStyleSheet("font-size: 11px;")
+        text.addWidget(t)
+        text.addWidget(self.state)
+        self.switch = ToggleSwitch()
+        layout.addWidget(icon)
+        layout.addLayout(text, 1)
+        layout.addWidget(self.switch, 0, Qt.AlignmentFlag.AlignVCenter)
+
+
+
 class ToggleSwitch(QAbstractButton):
     """An animated on/off switch."""
     def __init__(self, parent=None):
@@ -928,3 +954,134 @@ class ActivityFeed(QListView):
             painter.setPen(QColor(theme.MUTED))
             painter.drawText(QRectF(0, c.y() + 34, self.viewport().width(), 24),
                              Qt.AlignmentFlag.AlignCenter, self.empty_text)
+
+
+# ------------------------------------------------------------- scanner
+
+class ScanRing(QWidget):
+    """Progress ring for scans: a sweeping arc while counting files, then real progress."""
+    def __init__(self, size=184, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(size, size)
+        self.progress = None       # None = idle, -1 = indeterminate, 0..1 = progress
+        self._shown = 0.0
+        self._spin = 0.0
+        self._phase = 0.0
+        self._color = QColor(theme.ACCENT)
+        self._target = QColor(theme.ACCENT)
+        self.center_text = "Ready"
+        self.sub_text = ""
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(16)
+
+    def set_progress(self, value, center=None, sub=None):
+        self.progress = value
+        if center is not None:
+            self.center_text = center
+        if sub is not None:
+            self.sub_text = sub
+
+    def set_color(self, color):
+        self._target = QColor(color)
+
+    def reset(self):
+        self._shown = 0.0
+
+    def _tick(self):
+        if not self.isVisible():
+            return
+        if self.progress is not None and self.progress >= 0:
+            self._shown += (self.progress - self._shown) * 0.12
+        self._spin = (self._spin + 4) % 360
+        self._phase = (self._phase + 0.012) % 1.0
+        self._color = mix(self._color, self._target, 0.08)
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        c = QPointF(self.width() / 2, self.height() / 2)
+        r = self.width() / 2 - 16
+        color = self._color
+        breathe = 0.5 + 0.5 * math.sin(self._phase * 2 * math.pi)
+
+        glow = QRadialGradient(c, r + 16)
+        glow.setColorAt(0.55, with_alpha(color, 0.10 + 0.08 * breathe))
+        glow.setColorAt(1.0, with_alpha(color, 0.0))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(glow)
+        painter.drawEllipse(c, r + 16, r + 16)
+
+        ring = QRectF(c.x() - r, c.y() - r, 2 * r, 2 * r)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor(theme.SURFACE_3), 12))
+        painter.drawEllipse(ring)
+
+        pen_grad = QConicalGradient(c, 90)
+        pen_grad.setColorAt(0.0, QColor(theme.ACCENT_2) if color == QColor(theme.ACCENT) else color.lighter(130))
+        pen_grad.setColorAt(1.0, color)
+        if self.progress == -1:
+            pen = QPen(QBrush(pen_grad), 12)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen)
+            painter.drawArc(ring, int(-self._spin * 16), int(80 * 16))
+        elif self.progress is not None and self._shown > 0.002:
+            pen = QPen(QBrush(pen_grad), 12)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen)
+            painter.drawArc(ring, 90 * 16, int(-360 * 16 * min(1.0, self._shown)))
+
+        inner = r - 20
+        disc = QRadialGradient(QPointF(c.x(), c.y() - inner * 0.4), inner * 1.4)
+        disc.setColorAt(0, QColor("#ffffff"))
+        disc.setColorAt(1, mix(theme.SURFACE_2, color, 0.05))
+        painter.setPen(QPen(with_alpha(color, 0.12), 1))
+        painter.setBrush(disc)
+        painter.drawEllipse(c, inner, inner)
+
+        big = QFont(theme.FONT_FAMILY, 20)
+        big.setWeight(QFont.Weight.Bold)
+        painter.setFont(big)
+        painter.setPen(QColor(theme.TEXT))
+        painter.drawText(QRectF(c.x() - inner, c.y() - 26, 2 * inner, 34), Qt.AlignmentFlag.AlignCenter,
+                         self.center_text)
+        painter.setFont(QFont(theme.FONT_FAMILY, 8))
+        painter.setPen(QColor(theme.MUTED))
+        painter.drawText(QRectF(c.x() - inner, c.y() + 10, 2 * inner, 18), Qt.AlignmentFlag.AlignCenter,
+                         self.sub_text)
+
+
+class FadeStack(QWidget):
+    """Stacked pages that cross-fade and glide when switching."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.pages = []
+        self.current = 0
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._anim = None
+
+    def add(self, page):
+        self.pages.append(page)
+        self._layout.addWidget(page)
+        page.setVisible(len(self.pages) == 1)
+        return len(self.pages) - 1
+
+    def show_page(self, index):
+        if index == self.current:
+            return
+        old, new = self.pages[self.current], self.pages[index]
+        self.current = index
+        old.hide()
+        new.show()
+        effect = QGraphicsOpacityEffect(new)
+        new.setGraphicsEffect(effect)
+        fade = QPropertyAnimation(effect, b"opacity", new)
+        fade.setDuration(320)
+        fade.setStartValue(0.0)
+        fade.setEndValue(1.0)
+        fade.setEasingCurve(QEasingCurve.Type.OutCubic)
+        fade.finished.connect(lambda: new.setGraphicsEffect(None))
+        fade.start()
+        self._anim = fade

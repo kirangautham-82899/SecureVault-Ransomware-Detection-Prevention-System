@@ -57,6 +57,7 @@ class Event:
     category: str = "system"
     path: str = None
     timestamp: float = field(default_factory=time.time)
+    data: dict = None  # Extra structured details, e.g. a scanner finding
 
     @property
     def time_str(self):
@@ -75,9 +76,9 @@ def log_suspicious_activity(message, level=INFO):
         pass
 
 
-def emit(sink, level, message, category="system", path=None, log=True):
+def emit(sink, level, message, category="system", path=None, log=True, data=None):
     """Deliver an event to the sink and record it in the activity log."""
-    event = Event(level, message, category, path)
+    event = Event(level, message, category, path, data=data)
     if log:
         log_suspicious_activity(message, level)
     if sink is None:
@@ -301,10 +302,12 @@ def create_honeypot(folder=None, sink=None):
 # ---------------------------------------------------------------------------
 
 class RealTimeMonitor(FileSystemEventHandler):
-    def __init__(self, baseline_hashes, alert_queue=None, mass_threshold=5, mass_window=10, cooldown=15, root=None):
+    def __init__(self, baseline_hashes, alert_queue=None, mass_threshold=5, mass_window=10, cooldown=15, root=None,
+                 on_file=None):
         super().__init__()
         self.baseline_hashes = baseline_hashes
         self.root = root
+        self.on_file = on_file  # Called with new or changed file paths (on-access malware scanning)
         self.sink = alert_queue
         self.mass_threshold = mass_threshold
         self.mass_window = mass_window
@@ -332,6 +335,8 @@ class RealTimeMonitor(FileSystemEventHandler):
         file_hash = calculate_hash(path)
         if file_hash:
             self.baseline_hashes[path] = file_hash
+        if self.on_file:
+            self.on_file(path)
         self._record_change()
 
     def on_modified(self, event):
@@ -348,6 +353,8 @@ class RealTimeMonitor(FileSystemEventHandler):
             return
         old_hash = self.baseline_hashes.get(path)
         self.baseline_hashes[path] = new_hash
+        if new_hash != old_hash and self.on_file:
+            self.on_file(path)
         if old_hash and new_hash != old_hash:
             emit(self.sink, WARNING, f"File modified: {path}", "file", path)
             self._record_change()
@@ -381,6 +388,8 @@ class RealTimeMonitor(FileSystemEventHandler):
             emit(self.sink, CRITICAL, f"File renamed to ransomware extension: {src} -> {dest}", "file", dest)
         else:
             emit(self.sink, WARNING, f"File renamed: {src} -> {os.path.basename(dest)}", "file", dest)
+        if self.on_file and not self._skip(dest):
+            self.on_file(dest)
         self._record_change()
 
     def _record_change(self):
@@ -399,7 +408,7 @@ class RealTimeMonitor(FileSystemEventHandler):
         self._record_change()
 
 
-def start_real_time_monitor(path, alert_queue=None, stop_event=None, db_file=HASH_DB_FILE):
+def start_real_time_monitor(path, alert_queue=None, stop_event=None, db_file=HASH_DB_FILE, on_file=None):
     """Watch ``path`` until ``stop_event`` is set (or Ctrl+C in the console)."""
     sink = alert_queue
     if not os.path.isdir(path):
@@ -414,7 +423,7 @@ def start_real_time_monitor(path, alert_queue=None, stop_event=None, db_file=HAS
     else:
         baseline_hashes = dict(baseline["files"])
 
-    event_handler = RealTimeMonitor(baseline_hashes, sink, root=path)
+    event_handler = RealTimeMonitor(baseline_hashes, sink, root=path, on_file=on_file)
     observer = Observer()
     try:
         observer.schedule(event_handler, path=path, recursive=True)
@@ -537,6 +546,8 @@ def run_live_stream(folder, lan=False):
         server.publish(event)
         push_state(threat=counts[CRITICAL] > 0)
 
+    from scanner import Scanner, OnAccessScanner
+    on_access = OnAccessScanner(Scanner(), sink)
     url = server.start(lan=lan)
     push_state()
     print(f"\n📡 Live stream running: {url}")
@@ -544,11 +555,46 @@ def run_live_stream(folder, lan=False):
     threading.Thread(target=monitor_processes_sustained,
                      kwargs={"alert_queue": sink, "stop_event": stop}, daemon=True).start()
     try:
-        start_real_time_monitor(folder, sink, stop)
+        start_real_time_monitor(folder, sink, stop, on_file=on_access.submit)
     finally:
         stop.set()
+        on_access.stop()
         server.stop()
         print("Live stream stopped.")
+
+
+def run_antivirus_scan(targets=None, quarantine=False):
+    """Console antivirus scan. With no targets, runs a quick scan of the usual hiding places."""
+    from scanner import Scanner, quick_scan_targets, quarantine_file
+
+    scanner = Scanner()
+    targets = targets or quick_scan_targets()
+    engines = ", ".join(name for name, on in scanner.engines.items() if on)
+    print(f"🛡️  Engines: {engines} · {scanner.signature_count:,} signatures")
+    last = [0.0]
+
+    def progress(done, total, path):
+        if time.time() - last[0] > 0.2 or done == total:
+            last[0] = time.time()
+            print(f"\r   Scanning {done:,}/{total:,} files...", end="", flush=True)
+
+    result = scanner.scan(targets, sink=lambda e: None, progress=progress,
+                          use_defender=bool(scanner.defender), label="Scan")
+    print()
+    if not result["findings"]:
+        print(f"✅ No threats found in {result['scanned']:,} files ({result['duration']:.1f}s).")
+        return result
+    for f in result["findings"]:
+        print(f"{'🚨' if f.verdict == 'malicious' else '⚠️ '} {f.verdict.upper():10} {f.threat:28} {f.path}")
+        for reason in f.reasons:
+            print(f"      - {reason}")
+        if quarantine and f.verdict == "malicious" and os.path.exists(f.path):
+            try:
+                quarantine_file(f.path, f)
+                print("      → moved to quarantine")
+            except OSError as e:
+                print(f"      → could not quarantine: {e}")
+    return result
 
 
 def main_menu():
@@ -565,6 +611,7 @@ def main_menu():
         print("6. Launch GUI Dashboard")
         print("7. Change Folder")
         print("8. Live Stream to Browser (headless)")
+        print("9. Antivirus Scan (quick scan, or a folder)")
         print("0. Exit")
         try:
             choice = input("Choose an option: ").strip()
@@ -596,6 +643,9 @@ def main_menu():
         elif choice == "8":
             lan = input("Allow devices on your network to watch? [y/N]: ").strip().lower() == "y"
             run_live_stream(folder_to_monitor, lan)
+        elif choice == "9":
+            target = input("Folder or file to scan (Enter for a quick scan): ").strip().strip('"')
+            run_antivirus_scan([target] if target else None)
         elif choice == "0":
             print(f"Exiting {APP_NAME}.")
             break
@@ -611,6 +661,9 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     if "--gui" in args:
         launch_gui()
+    elif "--scan" in args:
+        rest = [os.path.abspath(a) for a in args if not a.startswith("--")]
+        run_antivirus_scan(rest or None, quarantine="--quarantine" in args)
     elif "--stream" in args:
         rest = [a for a in args if not a.startswith("--")]
         run_live_stream(os.path.abspath(rest[0]) if rest else os.getcwd(), lan="--lan" in args)

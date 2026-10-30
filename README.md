@@ -6,7 +6,7 @@
 
 ### Ransomware Detection & Prevention System
 
-*Real-time file integrity monitoring, honeypot deception and behavioral heuristics:<br/>an early warning system against ransomware for your most important folders.*
+*Real-time file integrity monitoring, honeypot deception, a built-in malware scanner and behavioral heuristics:<br/>a free early warning system against ransomware for your most important folders.*
 
 <br/>
 
@@ -14,10 +14,11 @@
 ![PyQt6](https://img.shields.io/badge/GUI-PyQt6-41CD52?style=for-the-badge&logo=qt&logoColor=white)
 ![Windows](https://img.shields.io/badge/Platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)
 ![Live](https://img.shields.io/badge/Live%20Stream-SSE-EF5B6E?style=for-the-badge)
-![Tests](https://img.shields.io/badge/Tests-23%20passing-22C55E?style=for-the-badge)
+![Antivirus](https://img.shields.io/badge/Antivirus-Built%20in-F2A33A?style=for-the-badge)
+![Tests](https://img.shields.io/badge/Tests-40%20passing-22C55E?style=for-the-badge)
 ![Version](https://img.shields.io/badge/Version-2.0.0-38BDF8?style=for-the-badge)
 
-[**Features**](#-features) · [**Screenshots**](#-screenshots) · [**Live Stream**](#-live-streaming) · [**Quick Start**](#-quick-start) · [**How It Works**](#-how-it-works) · [**Usage**](#-usage) · [**Project Structure**](#-project-structure)
+[**Features**](#-features) · [**Screenshots**](#-screenshots) · [**Antivirus**](#-antivirus) · [**Live Stream**](#-live-streaming) · [**Quick Start**](#-quick-start) · [**How It Works**](#-how-it-works) · [**Usage**](#-usage) · [**Project Structure**](#-project-structure)
 
 <br/>
 
@@ -33,8 +34,10 @@ Ransomware does its damage in minutes. It encrypts documents, renames them with 
 
 It takes a **known-good SHA-256 baseline** of your files, **watches every change in real time**, plants a **decoy honeypot file** that no legitimate program should ever touch, and keeps an eye on **processes burning CPU** the way encryption routines do. Everything shows up in a modern desktop dashboard, and every event can be exported as an evidence report.
 
+It also includes an **antivirus scanner** with Quick, Full and Custom scans, on-access scanning of new files, and a quarantine. It can use **Microsoft Defender** as a second engine.
+
 > [!NOTE]
-> SecureVault **detects and alerts**. It does not kill processes or restore files. Pair it with regular offline backups.
+> SecureVault **detects, alerts and quarantines**. It does not kill running processes or decrypt files. Pair it with regular offline backups.
 
 ---
 
@@ -86,6 +89,20 @@ One click exports a self-contained **HTML report** of every event in the session
 <tr>
 <td valign="top">
 
+### 🦠 Antivirus Scanner
+Quick, Full and Custom scans with **hash signatures, heuristics, optional YARA rules and Microsoft Defender**. Threats go to a **quarantine** where they can't run.
+
+</td>
+<td valign="top">
+
+### ⚡ On-Access Scanning
+While the real-time monitor runs, **every new or changed file** in the protected folder is scanned automatically, and threats raise a critical alert instantly.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
 ### 📡 Live Streaming
 Stream status, alerts and system load **in real time to any browser**, on this PC or your phone on the same Wi-Fi, through a private, read-only link.
 
@@ -120,6 +137,18 @@ A calm soft-blue interface with an animated protection ring, gliding toasts, cou
 
 <br/><br/>
 
+**Antivirus:** a custom scan catches a disguised `.pdf.exe`, a fake photo, an auto-running macro and a ransom note
+
+<img src="docs/antivirus.png" alt="SecureVault antivirus scan results" width="100%" />
+
+<br/><br/>
+
+**Quarantine:** neutralized files that can't run, with one-click restore or delete
+
+<img src="docs/quarantine.png" alt="SecureVault quarantine" width="100%" />
+
+<br/><br/>
+
 **SecureVault Live:** the same protection, streamed to a browser in real time
 
 <img src="docs/live-stream.png" alt="SecureVault Live web viewer" width="100%" />
@@ -134,6 +163,44 @@ A calm soft-blue interface with an animated protection ring, gliding toasts, cou
 </table>
 
 </div>
+
+---
+
+## 🦠 Antivirus
+
+Open the **Antivirus** tab and pick a scan:
+
+| Scan | What it checks |
+| :--- | :--- |
+| ⚡ **Quick scan** | Downloads, Desktop, Temp, the Startup folder and Public Downloads: where malware usually lands |
+| **Full scan** | Everything in your user folder |
+| **Custom** | Any folder or single file you choose |
+
+Each finding shows **why** it was flagged, a verdict (*Malicious* or *Suspicious*) and a score. **Quarantine** moves the file into a neutralized vault where it cannot run, and the **Quarantine** tab lets you restore or permanently delete it. **Ignore** dismisses false positives.
+
+### Detection engines
+
+| Engine | What it catches | Status |
+| :--- | :--- | :--- |
+| **Hash signatures** | Exact known malware, by SHA-256. Import free lists such as the [MalwareBazaar](https://bazaar.abuse.ch/export/) hash exports via *Signatures ▸ Import* | Built in, extendable |
+| **EICAR test file** | The standard harmless anti-virus test file | Built in |
+| **Heuristics** | Double extensions (`invoice.pdf.exe`), programs disguised as photos or documents, right-to-left filename tricks, scripts that delete shadow copies / disable recovery / switch off Defender / run hidden encoded PowerShell, auto-running Office macros that launch programs, ransom notes, malicious shortcuts | Built in |
+| **YARA rules** | Anything you write rules for; examples in `signatures/yara/` | Optional: `pip install yara-python` |
+| **Microsoft Defender** | Millions of real-world threats via Defender's engine (`MpCmdRun.exe`), used during scans without letting it delete anything on its own | Automatic when Defender is installed |
+
+**On-access scanning:** with *Scan new files automatically* on, every file created or changed in the protected folder is scanned while the real-time monitor runs.
+
+**From the command line:**
+```bash
+python main.py --scan                          # quick scan
+python main.py --scan "C:\Users\me\Downloads"  # scan a folder
+python main.py --scan "D:\" --quarantine       # scan and quarantine malicious files
+```
+
+> [!IMPORTANT]
+> **How does this compare to Avast or Bitdefender?** Honestly, it doesn't replace them. Commercial antivirus products use kernel drivers to block malware *before* it runs, plus cloud reputation, behavior blocking and signature databases with millions of entries maintained by full-time research teams. SecureVault scans files and alerts or quarantines; it doesn't block programs at the kernel level.
+>
+> The good news: **Windows already includes a free, top-rated antivirus, Microsoft Defender.** Keep it switched on. SecureVault adds ransomware-focused monitoring, a honeypot, its own heuristics and a friendly interface, and uses Defender as a second engine.
 
 ---
 
@@ -194,11 +261,14 @@ flowchart LR
     A --> C[👁️ Real-time watcher]
     A --> D[🧲 Honeypot file]
     E[⚙️ Running processes] --> F[CPU heuristics]
+    C -->|new files| S[🦠 Malware scanner<br/>signatures · heuristics · Defender]
 
     B --> G{Detection engine}
     C --> G
     D --> G
     F --> G
+    S --> G
+    S -->|threats| Q[🔒 Quarantine]
 
     G -->|info / warning| H[📋 Activity feed & log]
     G -->|critical| I[🚨 Threat alert<br/>toast · sound · tray]
@@ -216,6 +286,7 @@ flowchart LR
 | File content differs from baseline | 🟠 Warning | Possible unauthorized modification |
 | File deleted | 🟠 Warning | Some ransomware deletes originals after encrypting copies |
 | Process above 30% total CPU, 3 times in 30 s | 🟠 Warning | Bulk encryption is CPU-intensive |
+| New file is malware (on-access scan) | 🔴 **Critical** | Caught the moment it lands in the folder |
 | New file created | 🔵 Info | Tracked and hashed so later changes are detected |
 
 Noise such as temporary files, logs, `.git`, `node_modules` and `__pycache__` is ignored automatically.
@@ -251,12 +322,13 @@ Noise such as temporary files, logs, `.git`, `node_modules` and `__pycache__` is
 6. Launch GUI Dashboard
 7. Change Folder
 8. Live Stream to Browser (headless)
+9. Antivirus Scan (quick scan, or a folder)
 0. Exit
 ```
 
 The CLI starts on the current directory. Press <kbd>Ctrl</kbd> + <kbd>C</kbd> to stop a running monitor or stream.
 
-Shortcuts: `python main.py --gui` opens the dashboard, and `python main.py --stream [folder] [--lan]` starts a headless live stream.
+Shortcuts: `python main.py --gui` opens the dashboard, `python main.py --scan [path] [--quarantine]` runs an antivirus scan, and `python main.py --stream [folder] [--lan]` starts a headless live stream.
 
 ### Using the engine from Python
 
@@ -278,16 +350,22 @@ Every engine function accepts an optional `sink`: a callable or a `queue.Queue` 
 ```text
 SecureVault/
 ├── main.py              # Detection engine + CLI entry point
+├── scanner.py           # Antivirus engine, on-access scanning and quarantine
 ├── stream.py            # Live streaming server (Server-Sent Events)
+├── signatures/
+│   ├── hashes.txt       # SHA-256 signature list (import more from the app)
+│   └── yara/            # Optional YARA rules
 ├── web/
 │   └── index.html       # Live web viewer (responsive, works on phones)
 ├── gui/
 │   ├── main_gui.py      # Dashboard window, log viewer, report export
+│   ├── antivirus.py     # Antivirus and Quarantine pages
 │   ├── widgets.py       # Animated widgets: protection ring, tiles, toasts, feed, switches
 │   ├── theme.py         # Soft-blue palette and application stylesheet
 │   └── splash.py        # Startup splash screen
 ├── tests/
 │   ├── test_main.py     # Engine unit tests
+│   ├── test_scanner.py  # Antivirus engine and quarantine tests
 │   └── test_stream.py   # Live stream tests
 ├── docs/                # Logo and screenshots
 └── requirements.txt
@@ -299,6 +377,8 @@ Runtime files are created next to `main.py` and are git-ignored:
 | :--- | :--- |
 | `hash_db.json` | Baseline database: protected folder, creation time and file hashes |
 | `suspicious_activity.log` | Timestamped log of every event |
+| `quarantine/` | Neutralized quarantined files and their details |
+| `signatures/user_hashes.txt` | Hash signatures you imported |
 
 ---
 
@@ -308,7 +388,7 @@ Runtime files are created next to `main.py` and are git-ignored:
 python -m pytest tests
 ```
 
-The suite covers exclusions, hashing, baseline creation, integrity scans, honeypot alerts, ransomware-extension renames, mass-change detection, and the live stream: token checks, live event delivery and link revocation.
+The suite covers exclusions, hashing, baseline creation, integrity scans, honeypot alerts, ransomware-extension renames, mass-change detection, the antivirus engine (EICAR, signatures, every heuristic, Defender output parsing, quarantine round-trips, on-access scanning) and the live stream: token checks, live event delivery and link revocation.
 
 ---
 
@@ -322,6 +402,7 @@ The suite covers exclusions, hashing, baseline creation, integrity scans, honeyp
 | File monitoring | [watchdog](https://github.com/gorakhargosh/watchdog) |
 | Process metrics | [psutil](https://github.com/giampaolo/psutil) |
 | Hashing | SHA-256 (`hashlib`) |
+| Malware scanning | Own heuristics + optional [YARA](https://virustotal.github.io/yara/) + Microsoft Defender (`MpCmdRun.exe`) |
 
 ---
 

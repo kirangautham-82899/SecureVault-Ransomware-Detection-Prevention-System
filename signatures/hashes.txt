@@ -1,0 +1,10 @@
+# SecureVault hash signatures
+# One SHA-256 per line, optionally followed by a threat name:
+#   <sha256>  <Threat.Name>
+#
+# The EICAR anti-virus test file is built into the engine.
+#
+# To add thousands of real-world malware hashes, download a free hash list
+# (for example the "SHA256 hashes" export from https://bazaar.abuse.ch/export/)
+# and use "Import signatures" in the Antivirus tab. Imported hashes are stored
+# in user_hashes.txt next to this file.

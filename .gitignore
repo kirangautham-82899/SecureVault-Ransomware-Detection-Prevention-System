@@ -47,3 +47,5 @@ Evidence_Report_*.html
 SecureVault_Report_*.html
 hash_db.json.part
 .pytest_cache/
+quarantine/
+signatures/user_hashes.txt

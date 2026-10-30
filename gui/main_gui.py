@@ -32,12 +32,14 @@ from main import (  # noqa: E402
     normalize_path, emit, INFO, SUCCESS, WARNING, CRITICAL,
 )
 from stream import LiveStreamServer  # noqa: E402
+from scanner import Scanner, OnAccessScanner  # noqa: E402
 from gui import theme  # noqa: E402
 from gui.widgets import (  # noqa: E402
-    Card, StatChip, ToggleSwitch, StatusPill, StatusRing, Sparkline, ActionTile,
+    Card, StatChip, ToggleSwitch, ToggleRow, FadeStack, StatusPill, StatusRing, Sparkline, ActionTile,
     ActivityFeed, ToastManager, ShieldLogo, SoundManager, make_app_icon, add_shadow,
 )
 from gui.splash import SplashScreen  # noqa: E402
+from gui.antivirus import AntivirusPage, QuarantinePage  # noqa: E402
 
 
 class Bridge(QObject):
@@ -45,6 +47,7 @@ class Bridge(QObject):
     event = pyqtSignal(object)
     task_done = pyqtSignal(str, int, object)
     task_failed = pyqtSignal(str, int, str)
+    progress = pyqtSignal(int, int, str)
 
 
 class Backdrop(QWidget):
@@ -65,31 +68,6 @@ class Backdrop(QWidget):
             c.setAlpha(0)
             blob.setColorAt(1, c)
             painter.fillRect(self.rect(), blob)
-
-
-class ToggleRow(QWidget):
-    def __init__(self, glyph, title, parent=None):
-        super().__init__(parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 2, 0, 2)
-        layout.setSpacing(12)
-        icon = QLabel(glyph)
-        icon.setFixedSize(38, 38)
-        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon.setStyleSheet(f"background: {theme.ACCENT_SOFT}; border-radius: 12px; font-size: 16px;")
-        text = QVBoxLayout()
-        text.setSpacing(1)
-        t = QLabel(title)
-        t.setStyleSheet("font-weight: 600;")
-        self.state = QLabel("Off")
-        self.state.setObjectName("Muted")
-        self.state.setStyleSheet("font-size: 11px;")
-        text.addWidget(t)
-        text.addWidget(self.state)
-        self.switch = ToggleSwitch()
-        layout.addWidget(icon)
-        layout.addLayout(text, 1)
-        layout.addWidget(self.switch, 0, Qt.AlignmentFlag.AlignVCenter)
 
 
 class LogViewerWindow(QDialog):
@@ -316,13 +294,17 @@ class SecureVaultGUI(QMainWindow):
         self._running = {}       # task key -> token of the run currently owning it
         self._stop_events = {}   # task key -> threading.Event for long-running monitors
         self.stream = LiveStreamServer()
+        self.scanner = Scanner()
+        self.on_access_enabled = True
 
         self.bridge = Bridge()
         self.bridge.event.connect(self.on_event)
         self.bridge.task_done.connect(self.on_task_done)
         self.bridge.task_failed.connect(self.on_task_failed)
+        self.on_access = OnAccessScanner(self.scanner, self.sink)
 
         self.init_ui()
+        self.bridge.progress.connect(self.av_page.on_progress)
         self.setup_tray_icon()
         self.toasts = ToastManager(self.centralWidget())
 
@@ -364,7 +346,17 @@ class SecureVaultGUI(QMainWindow):
 
         body.addWidget(left_widget)
         body.addLayout(right, 1)
-        page.addLayout(body, 1)
+        protection_page = QWidget()
+        protection_page.setLayout(body)
+        body.setContentsMargins(0, 0, 0, 0)
+
+        self.pages = FadeStack()
+        self.pages.add(protection_page)
+        self.av_page = AntivirusPage(self)
+        self.pages.add(self.av_page)
+        self.quarantine_page = QuarantinePage(self)
+        self.pages.add(self.quarantine_page)
+        page.addWidget(self.pages, 1)
         self.setCentralWidget(root)
 
     def build_header(self):
@@ -381,6 +373,27 @@ class SecureVaultGUI(QMainWindow):
         titles.addWidget(subtitle)
         header.addWidget(logo)
         header.addLayout(titles)
+        header.addStretch()
+
+        nav = QFrame()
+        nav.setObjectName("Segment")
+        nav_layout = QHBoxLayout(nav)
+        nav_layout.setContentsMargins(4, 4, 4, 4)
+        nav_layout.setSpacing(2)
+        self.nav_group = QButtonGroup(self)
+        self.nav_buttons = []
+        for i, label in enumerate(("🛡  Protection", "🔍  Antivirus", "🔒  Quarantine")):
+            b = QPushButton(label)
+            b.setProperty("variant", "chip")
+            b.setCheckable(True)
+            b.setChecked(i == 0)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setStyleSheet("padding: 7px 16px;")
+            self.nav_group.addButton(b, i)
+            self.nav_buttons.append(b)
+            nav_layout.addWidget(b)
+        self.nav_group.idClicked.connect(self.show_page)
+        header.addWidget(nav)
         header.addStretch()
 
         self.live_pill = StatusPill()
@@ -631,6 +644,8 @@ class SecureVaultGUI(QMainWindow):
         elif key == "honeypot":
             self.buttons["honeypot"].set_busy(False)
             self.refresh_honeypot()
+        elif key == "av_scan":
+            self.av_page.on_scan_done(result)
         elif key == "load_baseline":
             self.baseline_meta = result
             self.refresh_baseline()
@@ -653,12 +668,16 @@ class SecureVaultGUI(QMainWindow):
         self.feed.add(event)
         if self.stream.running:
             self.stream.publish(event)
+        if event.category == "scanner" and event.data:
+            self.av_page.add_finding(event.data)
 
         now = time.time()
+        per_file_scan = event.category in ("scan", "scanner") and event.path
         if event.level == CRITICAL:
             self.threat_active = True
-            self.toasts.show("Threat detected", self._short(event), CRITICAL)
-            self._last_toast = now
+            if not (per_file_scan and now - self._last_toast < 1.5):  # one toast per burst of findings
+                self.toasts.show("Threat detected", self._short(event), CRITICAL)
+                self._last_toast = now
             SoundManager.play_alert()
             QApplication.alert(self)
             if not self.isVisible() and self.tray_icon.isVisible():
@@ -666,7 +685,6 @@ class SecureVaultGUI(QMainWindow):
                                            QSystemTrayIcon.MessageIcon.Critical, 8000)
         elif event.level in (WARNING, SUCCESS):
             # Individual scan findings go to the feed only; the scan summary gets the toast
-            per_file_scan = event.category == "scan" and event.path
             if not per_file_scan and now - self._last_toast > 1.2:
                 self.toasts.show({"warning": "Heads up", "success": "Done"}[event.level], self._short(event), event.level)
                 self._last_toast = now
@@ -874,7 +892,26 @@ class SecureVaultGUI(QMainWindow):
 
     def set_file_monitor(self, enabled):
         self._set_monitor("file_monitor", enabled, start_real_time_monitor,
-                          lambda stop: ((self.folder_to_monitor, self.sink, stop), {}))
+                          lambda stop: ((self.folder_to_monitor, self.sink, stop), {"on_file": self._on_access}))
+
+    def _on_access(self, path):
+        """Called on the monitor thread for new or changed files."""
+        if self.on_access_enabled:
+            self.on_access.submit(path)
+
+    def show_page(self, index):
+        self.nav_buttons[index].setChecked(True)
+        self.pages.show_page(index)
+        if index == 2:
+            self.quarantine_page.refresh()
+
+    def update_nav_badges(self, quarantined=None):
+        if not hasattr(self, "nav_buttons"):
+            return
+        threats = len(self.av_page.rows) if hasattr(self, "av_page") else 0
+        self.nav_buttons[1].setText(f"🔍  Antivirus · {threats}" if threats else "🔍  Antivirus")
+        if quarantined is not None:
+            self.nav_buttons[2].setText(f"🔒  Quarantine · {quarantined}" if quarantined else "🔒  Quarantine")
 
     def set_cpu_monitor(self, enabled):
         self._set_monitor("cpu_monitor", enabled, monitor_processes_sustained,
@@ -986,7 +1023,7 @@ td.m {{ word-break: break-all; }}
 
     def closeEvent(self, event):
         """Keep protecting from the tray while a monitor or the stream is running."""
-        busy = self._stop_events or self.stream.running
+        busy = self._stop_events or self.stream.running or self.av_page.scanning
         if not self._quitting and busy and self.tray_icon.isVisible():
             self.hide()
             if not self._tray_hint_shown:
@@ -1004,6 +1041,9 @@ td.m {{ word-break: break-all; }}
         for stop in self._stop_events.values():
             stop.set()
         self._stop_events.clear()
+        if self.av_page.stop_event:
+            self.av_page.stop_event.set()
+        self.on_access.stop()
         self.stream.stop()
         self.tray_icon.hide()
         QApplication.instance().quit()
