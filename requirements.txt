@@ -2,5 +2,5 @@
 watchdog==6.0.0
 psutil==7.0.0
 PyQt6==6.9.0
-PyQt6-Qt6==6.9.0
+PyQt6-Qt6==6.11.2
 PyQt6_sip==13.10.2
