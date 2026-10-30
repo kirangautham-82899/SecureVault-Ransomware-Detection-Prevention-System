@@ -18,6 +18,7 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 30
     env:
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
       GH_TOKEN: ${{ github.token }}
@@ -31,9 +32,9 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install dependencies
-        run: pip install -r requirements.txt pytest pyinstaller
+        run: pip install -r requirements.txt pytest pytest-timeout pyinstaller
       - name: Run tests
-        run: python -m pytest -q tests
+        run: python -m pytest -v --timeout=120 tests
       - name: Build SecureVault.exe
         run: python packaging/build.py
       - name: Smoke-test the build
