@@ -15,7 +15,8 @@
 ![Windows](https://img.shields.io/badge/Platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)
 ![Live](https://img.shields.io/badge/Live%20Stream-SSE-EF5B6E?style=for-the-badge)
 ![Antivirus](https://img.shields.io/badge/Antivirus-Built%20in-F2A33A?style=for-the-badge)
-![Tests](https://img.shields.io/badge/Tests-42%20passing-22C55E?style=for-the-badge)
+![Tests](https://img.shields.io/badge/Tests-51%20passing-22C55E?style=for-the-badge)
+![Privacy](https://img.shields.io/badge/Privacy-No%20telemetry-2FBF8F?style=for-the-badge)
 [![Release](https://img.shields.io/github/v/release/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System?style=for-the-badge&color=4C8DF6&label=Download)](https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System/releases/latest)
 
 ### [🌐 Website](https://kirangautham-82899.github.io/SecureVault-Ransomware-Detection-Prevention-System/) · [⬇️ Download for Windows](https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System/releases/latest/download/SecureVault-Windows.zip)
@@ -233,7 +234,7 @@ python main.py --stream "C:\Users\me\Documents" --public
 Headless mode runs the file and process monitors and prints the link. It's also option **8** in the CLI menu.
 
 > [!IMPORTANT]
-> **Privacy by design.** The viewer is **read-only**: nobody can change settings through it. Every request needs a **random access token**, and a new token is generated each time streaming starts, so stopping the stream revokes every link you've shared. The stream binds to `127.0.0.1` unless you explicitly allow your local network, and the internet tunnel only runs while you have it switched on.
+> **Privacy by design.** The viewer is **read-only**, every link carries a **128-bit secret** that changes each time you start streaming, and **privacy mode** (on by default) hides your folder paths and Windows user name from viewers. Sharing beyond this PC asks for confirmation, internet links **expire after 2 hours**, you're notified whenever someone opens the stream, and devices that guess links get locked out. See [SECURITY.md](SECURITY.md).
 
 **How it works:** a small built-in web server (Python standard library only) pushes updates over **Server-Sent Events**. Viewers reconnect automatically if the connection drops, and stalled viewers are disconnected so they never slow down detection. Through the internet tunnel, where live connections aren't reliable, the viewer switches to fetching updates every 2 seconds.
 
@@ -397,10 +398,11 @@ SecureVault/
 ├── tests/
 │   ├── test_main.py     # Engine unit tests
 │   ├── test_scanner.py  # Antivirus engine and quarantine tests
-│   └── test_stream.py   # Live stream tests
+│   └── test_stream.py   # Live stream and stream-safety tests
 ├── packaging/
 │   ├── build.py         # Builds SecureVault.exe and the release zip (PyInstaller)
 │   └── launcher.py      # Entry point of the packaged app
+├── SECURITY.md          # Privacy promises, stream safeguards, vulnerability reporting
 ├── docs/                # Website (GitHub Pages), logo and screenshots
 ├── .github/workflows/   # Tests on every push; release builds on version tags
 └── requirements.txt
@@ -439,6 +441,17 @@ The suite covers exclusions, hashing, baseline creation, integrity scans, honeyp
 | Process metrics | [psutil](https://github.com/giampaolo/psutil) |
 | Hashing | SHA-256 (`hashlib`) |
 | Malware scanning | Own heuristics + optional [YARA](https://virustotal.github.io/yara/) + Microsoft Defender (`MpCmdRun.exe`) |
+
+---
+
+## 🔐 Security & Privacy
+
+- **No accounts, ads, analytics or telemetry.** Your files and logs never leave your PC.
+- **Nothing is deleted without you.** Quarantine is reversible, and restore and delete always ask first.
+- **Live stream safeguards:** off by default, read-only, private links, privacy mode, auto-expiring internet links, viewer alerts and brute-force lockout.
+- **Verified downloads:** every release is built from this source by GitHub Actions and lists its SHA-256 checksum.
+
+Full details and how to report a vulnerability privately: **[SECURITY.md](SECURITY.md)**.
 
 ---
 

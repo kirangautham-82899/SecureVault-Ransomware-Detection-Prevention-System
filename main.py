@@ -22,7 +22,7 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 APP_NAME = "SecureVault"
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.1.1"
 
 # Bundled, read-only resources (web viewer, built-in signatures). In the packaged
 # Windows app PyInstaller unpacks these into sys._MEIPASS.
@@ -533,6 +533,7 @@ def run_live_stream(folder, lan=False, public=False):
     from stream import LiveStreamServer
 
     server = LiveStreamServer()
+    server.on_notice = lambda message: print(f"[{time.strftime('%H:%M:%S')}] NOTICE   {message}")
     counts = {WARNING: 0, CRITICAL: 0}
     stop = threading.Event()
     baseline = load_baseline()
@@ -567,7 +568,10 @@ def run_live_stream(folder, lan=False, public=False):
         except RuntimeError as e:
             print(f"   Could not open the public tunnel: {e}")
     print(f"\n📡 Live stream running: {url}")
-    print("   Anyone with this link can watch. Press Ctrl+C to stop.\n")
+    print("   Anyone with this link can watch. Folder paths are hidden from viewers.")
+    if server.public_base:
+        print("   The internet link closes automatically in 2 hours.")
+    print("   Press Ctrl+C to stop.\n")
     threading.Thread(target=monitor_processes_sustained,
                      kwargs={"alert_queue": sink, "stop_event": stop}, daemon=True).start()
     try:

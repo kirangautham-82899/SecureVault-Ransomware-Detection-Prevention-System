@@ -486,8 +486,18 @@ def list_quarantine(quarantine_dir=QUARANTINE_DIR):
     return sorted(entries, key=lambda e: e.get("quarantined_at", ""), reverse=True)
 
 
+_QID = re.compile(r"^[0-9a-f]{32}$")
+
+
+def _check_qid(qid):
+    """Quarantine ids are uuid4 hex strings; anything else could escape the quarantine folder."""
+    if not isinstance(qid, str) or not _QID.match(qid):
+        raise ValueError(f"Invalid quarantine id: {qid!r}")
+
+
 def restore_quarantined(qid, quarantine_dir=QUARANTINE_DIR):
     """Put a quarantined file back where it came from. Returns the restored path."""
+    _check_qid(qid)
     meta_path = os.path.join(quarantine_dir, qid + ".json")
     with open(meta_path, "r", encoding="utf-8") as f:
         entry = json.load(f)
@@ -505,6 +515,7 @@ def restore_quarantined(qid, quarantine_dir=QUARANTINE_DIR):
 
 
 def delete_quarantined(qid, quarantine_dir=QUARANTINE_DIR):
+    _check_qid(qid)
     for ext in (".qtn", ".json"):
         try:
             os.remove(os.path.join(quarantine_dir, qid + ext))

@@ -19,7 +19,7 @@ from PyQt6.QtGui import (
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout,
     QHBoxLayout, QGridLayout, QLineEdit, QFileDialog, QDialog, QPlainTextEdit,
-    QSystemTrayIcon, QMenu, QGraphicsOpacityEffect, QButtonGroup, QFrame,
+    QSystemTrayIcon, QMenu, QGraphicsOpacityEffect, QButtonGroup, QFrame, QMessageBox,
 )
 
 # Allow running this file directly as well as via main.py
@@ -183,6 +183,26 @@ class StreamDialog(QDialog):
         top.addLayout(titles, 1)
         layout.addLayout(top)
 
+        privacy_card = QFrame()
+        privacy_card.setObjectName("Card")
+        privacy_layout = QHBoxLayout(privacy_card)
+        privacy_layout.setContentsMargins(16, 12, 16, 12)
+        privacy_text = QVBoxLayout()
+        privacy_text.setSpacing(1)
+        privacy_title = QLabel("Hide folder paths (recommended)")
+        privacy_title.setStyleSheet("font-weight: 600;")
+        privacy_sub = QLabel("Viewers see file names only, never your folders or user name")
+        privacy_sub.setObjectName("Muted")
+        privacy_sub.setStyleSheet("font-size: 11px;")
+        privacy_text.addWidget(privacy_title)
+        privacy_text.addWidget(privacy_sub)
+        self.privacy_switch = ToggleSwitch()
+        self.privacy_switch.set_checked_silently(self.stream.private)
+        self.privacy_switch.toggled.connect(self._privacy_changed)
+        privacy_layout.addLayout(privacy_text, 1)
+        privacy_layout.addWidget(self.privacy_switch)
+        layout.addWidget(privacy_card)
+
         lan_card = QFrame()
         lan_card.setObjectName("Card")
         lan_layout = QHBoxLayout(lan_card)
@@ -191,9 +211,10 @@ class StreamDialog(QDialog):
         lan_text.setSpacing(1)
         lan_title = QLabel("Allow devices on my network")
         lan_title.setStyleSheet("font-weight: 600;")
-        lan_sub = QLabel("Watch from your phone or another PC on the same Wi-Fi")
+        lan_sub = QLabel("Your phone or another PC on the same Wi-Fi. Use on trusted networks only")
         lan_sub.setObjectName("Muted")
         lan_sub.setStyleSheet("font-size: 11px;")
+        lan_sub.setWordWrap(True)
         lan_text.addWidget(lan_title)
         lan_text.addWidget(lan_sub)
         self.lan_switch = ToggleSwitch()
@@ -275,12 +296,37 @@ class StreamDialog(QDialog):
             self._start()
         self.refresh()
 
+    def _confirm(self, title, text):
+        return QMessageBox.question(self, title, text) == QMessageBox.StandardButton.Yes
+
+    def _privacy_changed(self, checked):
+        if not checked and not self._confirm(
+                "Show folder paths?", "Viewers will see full file paths, which include your Windows user name "
+                                      "and folder names.\n\nShow them anyway?"):
+            self.privacy_switch.set_checked_silently(True)
+            return
+        self.stream.private = checked
+        self.stream.seed(self.window_.events[-300:])  # re-share history with the new setting
+        self.window_.push_stream_state()
+
     def _lan_changed(self, checked):
+        if checked and not self._confirm(
+                "Allow devices on your network?", "Anyone on this network who has the link will be able to watch.\n\n"
+                                                  "Only do this on a network you trust, like your home Wi-Fi, "
+                                                  "never on public Wi-Fi."):
+            self.lan_switch.set_checked_silently(False)
+            return
         if self.stream.running:  # The bind address changes, so restart with a new link
             self._start()
         self.refresh()
 
     def _net_changed(self, checked):
+        if checked and not self._confirm(
+                "Share over the internet?", "Anyone in the world who has the link will be able to watch "
+                                            "until you stop streaming. The link also closes by itself after 2 hours.\n\n"
+                                            "Only send it to people you trust. Share it now?"):
+            self.net_switch.set_checked_silently(False)
+            return
         if checked:
             if self.stream.running:
                 self.window_.start_tunnel()
@@ -311,7 +357,9 @@ class StreamDialog(QDialog):
         if running:
             n = self.stream.viewers
             if self.stream.public_base:
-                where = "anyone on the internet who has the link"
+                expires = datetime.datetime.fromtimestamp(self.stream.public_expires_at).strftime("%H:%M") \
+                    if self.stream.public_expires_at else "when you stop"
+                where = f"anyone on the internet who has the link (closes at {expires})"
             elif self.window_.tunnel_starting:
                 where = "this computer for now. Opening the internet tunnel…"
             else:
@@ -353,6 +401,8 @@ class SecureVaultGUI(QMainWindow):
         self.bridge.task_done.connect(self.on_task_done)
         self.bridge.task_failed.connect(self.on_task_failed)
         self.on_access = OnAccessScanner(self.scanner, self.sink)
+        self.stream.on_notice = lambda message: emit(
+            self.sink, WARNING if message.startswith("Blocked") else INFO, message, "stream")
 
         self.init_ui()
         self.bridge.progress.connect(self.av_page.on_progress)
@@ -660,7 +710,10 @@ class SecureVaultGUI(QMainWindow):
 
     def sink(self, event):
         """Backend event sink; safe to call from any thread."""
-        self.bridge.event.emit(event)
+        try:
+            self.bridge.event.emit(event)
+        except RuntimeError:  # the window is already gone (app quitting)
+            pass
 
     def run_task(self, key, fn, *args, **kwargs):
         token = next(self._tokens)
@@ -670,9 +723,13 @@ class SecureVaultGUI(QMainWindow):
             try:
                 result = fn(*args, **kwargs)
             except Exception as e:  # Surface unexpected backend failures instead of dying silently
-                self.bridge.task_failed.emit(key, token, str(e))
+                signal, payload = self.bridge.task_failed, str(e)
             else:
-                self.bridge.task_done.emit(key, token, result)
+                signal, payload = self.bridge.task_done, result
+            try:
+                signal.emit(key, token, payload)
+            except RuntimeError:  # the window is already gone (app quitting)
+                pass
 
         threading.Thread(target=target, name=f"securevault-{key}", daemon=True).start()
         return token

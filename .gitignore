@@ -49,3 +49,10 @@ hash_db.json.part
 .pytest_cache/
 quarantine/
 signatures/user_hashes.txt
+
+# Never commit personal or build output
+*.qtn
+securevault_logs.txt
+stream_url.txt
+*.spec
+.claude/

@@ -81,3 +81,85 @@ class TestLiveStream(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestStreamSafety(unittest.TestCase):
+    """Safety-first guarantees of the live stream."""
+
+    def setUp(self):
+        self.server = LiveStreamServer(port=18780)
+        self.server.start()
+        self.base = f"http://127.0.0.1:{self.server.port}"
+        self.notices = []
+        self.server.on_notice = self.notices.append
+
+    def tearDown(self):
+        self.server.stop()
+
+    def get(self, path, headers=None):
+        req = urllib.request.Request(self.base + path, headers=headers or {})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status, r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+
+    def test_token_is_128_bit(self):
+        self.assertGreaterEqual(len(self.server.token), 22)
+
+    def test_privacy_mode_hides_folders_and_user_name(self):
+        from stream import redact_paths
+        self.assertEqual(redact_paths(r"File modified: C:\Users\alice\My Docs\Notes.txt"), "File modified: Notes.txt")
+        self.assertEqual(redact_paths(r"Renamed: C:\Users\alice\a.docx -> C:\Users\alice\a.docx.locked"),
+                         "Renamed: a.docx -> a.docx.locked")
+        self.assertEqual(redact_paths("Found: " + "\\\\" + r"nas\share\alice\x.exe"), "Found: x.exe")
+        self.server.publish(Event(CRITICAL, r"Malware detected: C:\Users\alice\Downloads\bad.exe", "scanner",
+                                  r"C:\Users\alice\Downloads\bad.exe"))
+        self.server.update_state(subline=r"Watching C:\Users\alice\Documents")
+        status, body = self.get(f"/api/snapshot?token={self.server.token}")
+        self.assertEqual(status, 200)
+        self.assertNotIn("alice", body.decode())
+        self.assertIn("bad.exe", body.decode())
+
+    def test_private_mode_can_be_turned_off(self):
+        self.server.private = False
+        self.server.publish(Event(CRITICAL, r"C:\Users\alice\bad.exe", "scanner", r"C:\Users\alice\bad.exe"))
+        self.assertIn("alice", self.get(f"/api/snapshot?token={self.server.token}")[1].decode())
+
+    def test_rejects_unknown_host_header(self):
+        status, _ = self.get(f"/?token={self.server.token}", {"Host": "evil.example:80"})
+        self.assertEqual(status, 421)
+
+    def test_locks_out_token_guessing(self):
+        from stream import LOCKOUT_FAILURES
+        for _ in range(LOCKOUT_FAILURES):
+            self.assertEqual(self.get("/?token=guess")[0], 403)
+        self.assertEqual(self.get(f"/?token={self.server.token}")[0], 429, "even the right token is refused now")
+        self.assertTrue(any("Blocked" in n for n in self.notices))
+
+    def test_host_is_told_about_new_viewers(self):
+        self.get(f"/api/poll?token={self.server.token}&since=0&client=viewer1")
+        self.get(f"/api/poll?token={self.server.token}&since=0&client=viewer1")
+        self.assertEqual(sum("opened your live stream" in n for n in self.notices), 1)
+
+    def test_viewer_limit(self):
+        import stream
+        old = stream.MAX_VIEWERS
+        stream.MAX_VIEWERS = 1
+        try:
+            self.assertEqual(self.get(f"/api/poll?token={self.server.token}&client=a")[0], 200)
+            self.assertEqual(self.get(f"/api/poll?token={self.server.token}&client=b")[0], 503)
+        finally:
+            stream.MAX_VIEWERS = old
+
+    def test_public_link_expires(self):
+        import subprocess
+        import time as _time
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        self.server._tunnel = proc
+        self.server.public_base = "https://demo.trycloudflare.com"
+        self.server._expire_public(proc)
+        self.assertIsNone(self.server.public_url)
+        _time.sleep(0.2)
+        self.assertIsNotNone(proc.poll(), "the tunnel process is stopped")
+        self.assertTrue(any("expired" in n for n in self.notices))

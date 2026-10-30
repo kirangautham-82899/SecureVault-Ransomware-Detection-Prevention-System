@@ -10,9 +10,8 @@
 <meta property="og:image" content="https://kirangautham-82899.github.io/SecureVault-Ransomware-Detection-Prevention-System/dashboard.png">
 <meta name="theme-color" content="#4c8df6">
 <link rel="icon" href="logo.svg" type="image/svg+xml">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://api.github.com; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <style>
 :root {
   --bg: #eef3fb; --bg-deep: #e2ebf8; --surface: #ffffff; --surface-2: #f5f8fe; --surface-3: #eaf1fc;
@@ -26,7 +25,7 @@
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 body {
-  margin: 0; color: var(--text); font-family: Inter, "Segoe UI", system-ui, -apple-system, sans-serif;
+  margin: 0; color: var(--text); font-family: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
   background:
     radial-gradient(1000px 600px at 90% -10%, rgba(122, 169, 255, .30), transparent 60%),
     radial-gradient(800px 600px at -10% 40%, rgba(47, 191, 143, .10), transparent 60%),
@@ -214,7 +213,7 @@ footer a { color: var(--muted); }
       </a>
       <a class="btn" href="#tour">Take the tour</a>
     </div>
-    <div class="meta"><span class="version">Version 2.1.0</span> · Windows 10 &amp; 11 · No install needed · Free</div>
+    <div class="meta"><span class="version">Version 2.1.1</span> · Windows 10 &amp; 11 · No install needed · Free</div>
 
     <div class="shot"><img src="dashboard.png" alt="SecureVault dashboard showing protection status, stats and live activity" width="1800" height="1055"></div>
 
@@ -324,11 +323,17 @@ footer a { color: var(--muted); }
       <details class="reveal"><summary>Windows says "Windows protected your PC". Is that normal?</summary>
         <p>Yes. SmartScreen shows that for new apps that aren't code-signed with a paid certificate. Click <b>More info</b> and then <b>Run anyway</b>.
           You can also build the app yourself from the source code with one command.</p></details>
+      <details class="reveal"><summary>How do I know my download is genuine?</summary>
+        <p>Only download SecureVault from this website or its GitHub Releases page. Each release lists the zip's SHA-256 checksum
+          (also in <code>SHA256SUMS.txt</code>). In PowerShell, run <code>(Get-FileHash .\SecureVault-Windows.zip).Hash</code>
+          and check that it matches. Every release is built automatically from the public source code by GitHub.</p></details>
       <details class="reveal"><summary>How do I install it?</summary>
         <p>Download the zip, extract it anywhere (for example <code>Documents\SecureVault</code>) and run <code>SecureVault.exe</code>. No installer, no admin rights.
           Your settings, logs and quarantine live in <code>%LOCALAPPDATA%\SecureVault</code>.</p></details>
       <details class="reveal"><summary>Does my data leave my computer?</summary>
-        <p>No. Everything runs locally. The only exception is the live stream, and only when you start it: viewers with your private link can see its status page.</p></details>
+        <p>No. There are no accounts, ads, analytics or telemetry, and everything runs locally. The only exception is the live stream, and only while you
+          have it on: viewers with your private link see its status page, with folder paths and your user name hidden by default. Internet links close
+          automatically after 2 hours, and SecureVault tells you whenever someone opens your stream.</p></details>
       <details class="reveal"><summary>How do I watch from my phone?</summary>
         <p>Click <b>Go live</b>, then turn on <b>Allow devices on my network</b> (same Wi-Fi) or <b>Share over the internet</b> (anywhere).
           Internet sharing needs Cloudflare's free tool: <code>winget install Cloudflare.cloudflared</code>.</p></details>
@@ -351,7 +356,7 @@ footer a { color: var(--muted); }
         </a>
         <a class="btn" href="https://github.com/kirangautham-82899/SecureVault-Ransomware-Detection-Prevention-System/releases" target="_blank" rel="noopener">All releases</a>
       </div>
-      <div class="meta"><span class="version">Version 2.1.0</span> · <span id="size">≈ 35 MB</span></div>
+      <div class="meta"><span class="version">Version 2.1.1</span> · <span id="size">≈ 35 MB</span></div>
     </div>
   </div>
 </section>

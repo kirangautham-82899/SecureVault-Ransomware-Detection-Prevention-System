@@ -381,7 +381,10 @@ class AntivirusPage(QWidget):
         now = time.time()
         if now - self._last_progress > 0.08 or done == total:
             self._last_progress = now
-            self.w.bridge.progress.emit(done, total, path)
+            try:
+                self.w.bridge.progress.emit(done, total, path)
+            except RuntimeError:  # the window is already gone (app quitting)
+                pass
 
     def on_progress(self, done, total, path):
         if not self.scanning:

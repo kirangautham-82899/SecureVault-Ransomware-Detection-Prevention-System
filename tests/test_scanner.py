@@ -160,6 +160,15 @@ Resources               : 1 total
         self.assertEqual(os.listdir(qdir), [])
 
 
+class TestQuarantineSafety(unittest.TestCase):
+    def test_rejects_ids_that_could_escape_the_quarantine(self):
+        for bad in ("../../Windows/system32/x", r"..\evil", "", "ABC", None):
+            with self.assertRaises(ValueError):
+                delete_quarantined(bad, tempfile.gettempdir())
+            with self.assertRaises(ValueError):
+                restore_quarantined(bad, tempfile.gettempdir())
+
+
 class TestOnAccess(unittest.TestCase):
     def test_on_access_scanner_reports_new_threats(self):
         import threading

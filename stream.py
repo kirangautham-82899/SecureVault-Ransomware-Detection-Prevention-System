@@ -2,14 +2,23 @@
 """SecureVault Live: stream status, events and system load to web browsers.
 
 A tiny standard-library HTTP server pushes updates with Server-Sent Events.
-The viewer is read-only and every request must carry the random access token
-that is generated each time streaming starts, so stopping the stream revokes
-every link that was shared.
-
 For viewing from anywhere, ``start_public`` opens a Cloudflare quick tunnel
 (``cloudflared``, no account needed) to the local server. Quick tunnels do not
 reliably pass Server-Sent Events, so the viewer falls back to polling
 ``/api/poll`` when the live connection does not come up.
+
+Safety first:
+
+* Read-only: viewers can look, never change anything.
+* Every request needs a 128-bit random token that is regenerated each time
+  streaming starts, so stopping the stream revokes every shared link.
+* Privacy mode (on by default) strips folder paths, and with them your user
+  name, from everything viewers receive; only file names remain.
+* Only this computer can connect unless the network or internet is allowed
+  explicitly; internet links expire automatically.
+* Repeated wrong tokens get the sender locked out, unexpected Host headers are
+  rejected (DNS-rebinding protection), and viewers/connections are capped.
+* The host is told whenever a new viewer opens the stream.
 """
 import os
 import re
@@ -38,30 +47,62 @@ CLOUDFLARED_PATHS = [
 WEB_DIR = os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))), "web")
 DEFAULT_PORT = 8765
 
+TOKEN_BYTES = 16                 # 128-bit access tokens
+PUBLIC_LINK_HOURS = 2            # internet links close themselves after this long
+MAX_VIEWERS = 25
+MAX_CONCURRENT_REQUESTS = 64
+LOCKOUT_FAILURES = 10            # wrong tokens allowed per sender...
+LOCKOUT_WINDOW = 10 * 60         # ...within this many seconds...
+LOCKOUT_SECONDS = 15 * 60        # ...before the sender is blocked for this long
+
 SECURITY_HEADERS = {
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "no-referrer",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Resource-Policy": "same-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
     "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; "
-                               "style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'",
+                               "style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; "
+                               "frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
 }
 
-DENIED_PAGE = b"""<!doctype html><meta charset="utf-8"><title>SecureVault Live</title>
+
+def _page(title, text):
+    return (f"""<!doctype html><meta charset="utf-8"><title>SecureVault Live</title>
 <body style="font-family:Segoe UI,system-ui,sans-serif;background:#eef3fb;color:#1d2b4f;
 display:grid;place-items:center;height:100vh;margin:0;text-align:center">
-<div><h2>Access link required</h2><p style="color:#6b7a9c">Open the live-stream link shown in SecureVault.
-<br>Links stop working when streaming is stopped.</p></div></body>"""
+<div><h2>{title}</h2><p style="color:#6b7a9c">{text}</p></div></body>""").encode("utf-8")
 
 
-def event_payload(event):
-    return {
+DENIED_PAGE = _page("Access link required", "Open the live-stream link shown in SecureVault.<br>"
+                                            "Links stop working when streaming is stopped.")
+LOCKED_PAGE = _page("Too many attempts", "This device tried too many wrong links. Try again later.")
+BUSY_PAGE = _page("Stream is busy", "Too many people are watching right now. Try again later.")
+
+# A Windows folder path (drive or network share) up to its last backslash.
+# File names can't contain : < > | " ? * so the match never runs into the next path.
+_FOLDER_PART = re.compile(r'(?:[A-Za-z]:\\|\\\\)(?:[^\\\n:<>|"?*]*\\)*')
+
+
+def redact_paths(text):
+    """Drop folder paths (which include the user name) and keep only file names."""
+    return _FOLDER_PART.sub("", text) if text else text
+
+
+def event_payload(event, private=True):
+    payload = {
         "level": event.level,
         "message": event.message,
         "category": event.category,
         "path": event.path,
         "ts": event.timestamp,
     }
+    if private:
+        payload["message"] = redact_paths(event.message)
+        payload["path"] = None  # viewers never get full paths in privacy mode
+    return payload
 
 
 def find_cloudflared():
@@ -97,7 +138,11 @@ class LiveStreamServer:
         self.port_hint = port
         self.port = None
         self.lan = False
+        self.private = True           # hide folder paths from viewers
         self.token = None
+        self.on_notice = None         # callable(str): tells the host about viewers and expiry
+        self.public_expires_at = None
+        self.public_base = None
         self._httpd = None
         self._clients = set()
         self._lock = threading.Lock()
@@ -106,9 +151,12 @@ class LiveStreamServer:
         self._state = {}
         self._stop = threading.Event()
         self._seq = 0
-        self._pollers = {}        # polling viewer id -> last seen
+        self._pollers = {}            # polling viewer id -> last seen
+        self._failures = {}           # sender -> deque of failure times
+        self._locked = {}             # sender -> locked until
+        self._slots = threading.BoundedSemaphore(MAX_CONCURRENT_REQUESTS)
         self._tunnel = None
-        self.public_base = None
+        self._expiry_timer = None
 
     # ----------------------------------------------------------- control
 
@@ -140,8 +188,12 @@ class LiveStreamServer:
         """Start serving and return the shareable URL."""
         self.stop()
         self.lan = lan
-        self.token = secrets.token_urlsafe(12)
+        self.token = secrets.token_urlsafe(TOKEN_BYTES)
         self._stop.clear()
+        with self._lock:
+            self._failures.clear()
+            self._locked.clear()
+            self._pollers.clear()
         host = "0.0.0.0" if lan else "127.0.0.1"
         handler = _make_handler(self)
         for port in range(self.port_hint, self.port_hint + 20):
@@ -177,16 +229,24 @@ class LiveStreamServer:
         httpd.server_close()
         self.token = None
 
+    def _notice(self, message):
+        if self.on_notice:
+            try:
+                self.on_notice(message)
+            except Exception:
+                pass
+
     # ------------------------------------------------------- public tunnel
 
     @staticmethod
     def tunnel_available():
         return find_cloudflared() is not None
 
-    def start_public(self, timeout=45, attempts=2):
+    def start_public(self, timeout=45, attempts=2, expires_in=PUBLIC_LINK_HOURS * 3600):
         """Expose the running stream on the internet. Returns the public viewer URL.
 
-        Free quick tunnels occasionally fail to come up, so one retry is built in.
+        The link closes itself after ``expires_in`` seconds. Free quick tunnels
+        occasionally fail to come up, so one retry is built in.
         """
         if not self.running:
             raise RuntimeError("Start streaming first")
@@ -197,8 +257,19 @@ class LiveStreamServer:
         for _ in range(attempts):
             url, reason = self._open_tunnel(exe, timeout)
             if url:
+                if expires_in:
+                    self.public_expires_at = time.time() + expires_in
+                    timer = threading.Timer(expires_in, self._expire_public, args=(self._tunnel,))
+                    timer.daemon = True
+                    timer.start()
+                    self._expiry_timer = timer
                 return url
         raise RuntimeError(f"Cloudflare tunnel did not start: {reason}")
+
+    def _expire_public(self, proc):
+        if self._tunnel is proc:
+            self.stop_public()
+            self._notice("Public live link expired and was closed automatically")
 
     def _open_tunnel(self, exe, timeout):
         self.stop_public()
@@ -231,6 +302,10 @@ class LiveStreamServer:
     def stop_public(self):
         proc, self._tunnel = self._tunnel, None
         self.public_base = None
+        self.public_expires_at = None
+        if self._expiry_timer:
+            self._expiry_timer.cancel()
+            self._expiry_timer = None
         if proc and proc.poll() is None:
             proc.terminate()
             try:
@@ -238,11 +313,45 @@ class LiveStreamServer:
             except subprocess.TimeoutExpired:
                 proc.kill()
 
+    # --------------------------------------------------- access control
+
+    def allowed_hosts(self):
+        hosts = {f"127.0.0.1:{self.port}", f"localhost:{self.port}"}
+        if self.lan:
+            hosts.add(f"{local_ip()}:{self.port}")
+        if self.public_base:
+            hosts.add(urlparse(self.public_base).netloc)
+        return hosts
+
+    def check_token(self, sender, token):
+        """Returns "ok", "denied" or "locked", and counts failures per sender."""
+        now = time.time()
+        with self._lock:
+            if self._locked.get(sender, 0) > now:
+                return "locked"
+            if self.token and token and hmac.compare_digest(token, self.token):
+                return "ok"
+            failures = self._failures.setdefault(sender, deque())
+            failures.append(now)
+            while failures and now - failures[0] > LOCKOUT_WINDOW:
+                failures.popleft()
+            if len(failures) >= LOCKOUT_FAILURES:
+                self._locked[sender] = now + LOCKOUT_SECONDS
+                failures.clear()
+                locked = True
+            else:
+                locked = False
+            if len(self._failures) > 1000:
+                self._failures.clear()
+        if locked:
+            self._notice("Blocked a device that kept trying wrong live-stream links")
+        return "denied"
+
     # ---------------------------------------------------------- publishing
 
     def _payload(self, event):
         self._seq += 1
-        payload = event_payload(event)
+        payload = event_payload(event, self.private)
         payload["id"] = self._seq
         return payload
 
@@ -259,6 +368,8 @@ class LiveStreamServer:
             self._history.extend(self._payload(e) for e in events)
 
     def update_state(self, **state):
+        if self.private:
+            state = {k: redact_paths(v) if isinstance(v, str) else v for k, v in state.items()}
         self._state.update(state)
         self._broadcast("state", self._state)
 
@@ -267,15 +378,20 @@ class LiveStreamServer:
             events, metrics = list(self._history), list(self._metrics)
         return {"state": self._state, "events": events, "metrics": metrics, "viewers": self.viewers}
 
-    def poll(self, since, client):
+    def poll(self, since, client, origin="this computer"):
         """Updates for viewers that cannot hold a live connection open."""
+        new_viewer = False
         with self._lock:
             if client:
-                self._pollers[client[:40]] = time.time()
+                client = client[:40]
+                new_viewer = client not in self._pollers
+                self._pollers[client] = time.time()
                 if len(self._pollers) > 500:
                     self._pollers.clear()
             events = [e for e in self._history if e["id"] > since]
             metrics = list(self._metrics)
+        if new_viewer:
+            self._notice(f"Someone opened your live stream ({origin})")
         return {"state": self._state, "events": events, "metrics": metrics, "viewers": self.viewers}
 
     def _broadcast(self, name, data):
@@ -287,10 +403,11 @@ class LiveStreamServer:
                 except queue.Full:  # A stalled viewer must not hold up everyone else
                     self._clients.discard(q)
 
-    def _register(self, q):
+    def _register(self, q, origin="this computer"):
         with self._lock:
             self._clients.add(q)
         self._broadcast("viewers", {"count": self.viewers})
+        self._notice(f"Someone opened your live stream ({origin})")
 
     def _unregister(self, q):
         with self._lock:
@@ -308,7 +425,7 @@ class LiveStreamServer:
 
 def _make_handler(live):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "SecureVaultLive/1.0"
+        server_version = "SecureVaultLive"
         sys_version = ""
 
         def log_message(self, *args):
@@ -327,11 +444,40 @@ def _make_handler(live):
             self.end_headers()
             self.wfile.write(body)
 
+        def _sender(self):
+            """Who is asking: the real visitor for tunnelled requests, else the socket peer."""
+            peer = self.client_address[0]
+            if peer in ("127.0.0.1", "::1") and live.public_base:
+                return self.headers.get("CF-Connecting-IP", peer)[:64]
+            return peer
+
+        def _origin(self):
+            peer = self.client_address[0]
+            if peer in ("127.0.0.1", "::1"):
+                return "via the internet" if self.headers.get("CF-Connecting-IP") else "this computer"
+            return "your local network"
+
         def do_GET(self):
+            if not live._slots.acquire(blocking=False):
+                self._send(503, BUSY_PAGE, "text/html; charset=utf-8")
+                return
+            try:
+                self._handle()
+            finally:
+                live._slots.release()
+
+        def _handle(self):
+            host = (self.headers.get("Host") or "").lower()
+            if host not in live.allowed_hosts():  # DNS-rebinding protection
+                self._send(421, b"Unknown host", "text/plain")
+                return
             url = urlparse(self.path)
             query = parse_qs(url.query)
-            token = query.get("token", [""])[0]
-            if not (live.token and hmac.compare_digest(token, live.token)):
+            verdict = live.check_token(self._sender(), query.get("token", [""])[0])
+            if verdict == "locked":
+                self._send(429, LOCKED_PAGE, "text/html; charset=utf-8")
+                return
+            if verdict != "ok":
                 self._send(403, DENIED_PAGE, "text/html; charset=utf-8")
                 return
             if url.path in ("/", "/index.html"):
@@ -344,9 +490,16 @@ def _make_handler(live):
                     since = int(query.get("since", ["0"])[0])
                 except ValueError:
                     since = 0
-                body = live.poll(since, query.get("client", [""])[0])
+                client = query.get("client", [""])[0]
+                if client and live.viewers >= MAX_VIEWERS and client[:40] not in live._pollers:
+                    self._send(503, BUSY_PAGE, "text/html; charset=utf-8")
+                    return
+                body = live.poll(since, client, self._origin())
                 self._send(200, json.dumps(body).encode("utf-8"), "application/json")
             elif url.path == "/stream":
+                if live.viewers >= MAX_VIEWERS:
+                    self._send(503, BUSY_PAGE, "text/html; charset=utf-8")
+                    return
                 self._stream()
             else:
                 self._send(404, b"Not found", "text/plain")
@@ -356,11 +509,13 @@ def _make_handler(live):
             self.send_header("Connection", "keep-alive")
             self.end_headers()
             q = queue.Queue(maxsize=500)
+            registered = False
             try:
                 snapshot = json.dumps(live.snapshot())
                 self.wfile.write(f"retry: 3000\nevent: snapshot\ndata: {snapshot}\n\n".encode("utf-8"))
                 self.wfile.flush()
-                live._register(q)
+                live._register(q, self._origin())
+                registered = True
                 while True:
                     try:
                         message = q.get(timeout=15)
@@ -377,6 +532,7 @@ def _make_handler(live):
             except OSError:  # Viewer closed the tab
                 pass
             finally:
-                live._unregister(q)
+                if registered:
+                    live._unregister(q)
 
     return Handler
